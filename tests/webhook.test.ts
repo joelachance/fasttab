@@ -24,6 +24,21 @@ describe("handleAgentPhoneWebhook", () => {
     await expect(
       json(
         await handleAgentPhoneWebhook(payload, {
+          textIntake: async (input) => {
+            expect(input).toMatchObject({
+              roomId: "conv_123",
+              agentId: "agent_123",
+              fromNumber: "+15551234567",
+              agentNumberId: "num_123",
+              body: "thai food",
+              channel: "sms",
+            });
+            return {
+              reply: "Hi, this is your FastTab agent. What would you like to order?",
+              state: "confirming_preferences",
+              extracted: {},
+            };
+          },
           textSender: {
             sendText: async (input) => {
               sent.push(input);
@@ -37,7 +52,7 @@ describe("handleAgentPhoneWebhook", () => {
         agentId: "agent_123",
         toNumber: "+15551234567",
         numberId: "num_123",
-        body: "Hi, this is your Fast Hab agent. What would you like to order?",
+        body: "Hi, this is your FastTab agent. What would you like to order?",
       },
     ]);
   });
@@ -72,6 +87,11 @@ describe("handleAgentPhoneWebhook", () => {
     await expect(
       json(
         await handleAgentPhoneWebhook(payload, {
+          textIntake: async () => ({
+            reply: "Hi, this is your FastTab agent. What would you like to order?",
+            state: "confirming_preferences",
+            extracted: {},
+          }),
           textSender: {
             sendText: async () => {
               throw new Error("send failed");

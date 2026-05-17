@@ -117,6 +117,36 @@ describe("OrderSessionStore", () => {
     expect(calls[0]?.params?.[3]).toBe(JSON.stringify({ channel: "sms" }));
   });
 
+  test("lists room participants", async () => {
+    const { sql, calls } = createFakeSql([
+      [
+        {
+          participant_id: "participant_123",
+          room_id: "room_123",
+          phone_number: "+15551234567",
+          display_name: "Joe",
+          role: "initiator",
+          preferences: { dietary: ["vegetarian"] },
+          joined_at: "2026-05-17T18:00:00.000Z",
+        },
+      ],
+    ]);
+    const store = new OrderSessionStore(sql);
+
+    await expect(store.listParticipants("room_123")).resolves.toEqual([
+      {
+        participantId: "participant_123",
+        roomId: "room_123",
+        phoneNumber: "+15551234567",
+        displayName: "Joe",
+        role: "initiator",
+        preferences: { dietary: ["vegetarian"] },
+        joinedAt: new Date("2026-05-17T18:00:00.000Z"),
+      },
+    ]);
+    expect(calls[0]?.params).toEqual(["room_123"]);
+  });
+
   test("enqueues and claims background jobs", async () => {
     const jobRow = {
       job_id: "job_123",

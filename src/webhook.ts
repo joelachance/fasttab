@@ -3,6 +3,11 @@ import crypto from "node:crypto";
 import { AgentPhoneClient } from "agentphone";
 
 import { envWithDefault, requiredEnv, type Env } from "./env.js";
+import {
+  handleFoodrunTextMessage,
+  type FoodrunTextIntakeResult,
+  type FoodrunTextMessage,
+} from "./foodrun/text-intake.js";
 
 const WEBHOOK_TOLERANCE_SECONDS = 5 * 60;
 
@@ -60,6 +65,7 @@ export type AgentPhoneTextSender = {
 
 export type AgentPhoneWebhookHandlerOptions = {
   textSender?: AgentPhoneTextSender;
+  textIntake?: (input: FoodrunTextMessage) => Promise<FoodrunTextIntakeResult>;
   env?: Env;
 };
 
@@ -181,10 +187,25 @@ export async function handleAgentPhoneWebhook(
   }
 
   const body = stringField(payload.data, "body", "text", "message", "content") ?? "";
-  const reply =
-    body.trim() ?
-      "Hi, this is your Fast Hab agent. What would you like to order?"
-    : "Hi, this is your Fast Hab agent.";
+  const roomId = stringField(payload.data, "conversationId", "conversation_id") ?? `${payload.agentId}-${fromNumber}`;
+  const messageId = stringField(payload.data, "messageId", "message_id");
+  let reply = "Hi, this is your FastTab agent. What would you like to order?";
+
+  try {
+    const intake = await (options.textIntake ?? handleFoodrunTextMessage)({
+      roomId,
+      agentId: payload.agentId,
+      fromNumber,
+      agentNumberId: numberId,
+      body,
+      messageId,
+      channel: payload.channel,
+    });
+    reply = intake.reply;
+  } catch (error) {
+    console.error("FastTab text intake failed", error);
+  }
+
   const sender = options.textSender ?? new AgentPhoneSdkTextSender(options.env);
 
   try {

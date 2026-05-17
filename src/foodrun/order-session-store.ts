@@ -198,6 +198,20 @@ export class OrderSessionStore {
     return mapParticipant(rows[0]);
   }
 
+  async listParticipants(roomId: string): Promise<FoodrunParticipant[]> {
+    const rows = (await this.sql.query(
+      `
+        SELECT *
+        FROM foodrun_order_participants
+        WHERE room_id = $1
+        ORDER BY joined_at ASC
+      `,
+      [roomId],
+    )) as ParticipantRow[];
+
+    return rows.map(mapParticipant);
+  }
+
   async appendEvent(input: {
     roomId?: string;
     eventType: string;
