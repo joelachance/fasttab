@@ -38,7 +38,10 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("Do not place an order");
     expect(prompt).toContain("Prefer Toast first");
     expect(prompt).toContain("Avoid DoorDash");
+    expect(prompt).toContain("First run an availability scan");
     expect(prompt).toContain("currently accepting online orders");
+    expect(prompt).toContain("Check at least 3 direct-ordering candidates");
+    expect(prompt).toContain("return the best currently accepting nearby alternative cuisine");
     expect(prompt).toContain("Return the most cartable option first");
     expect(prompt).toContain("Hayes Valley");
     expect(prompt).toContain("Thai");

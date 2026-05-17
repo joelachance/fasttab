@@ -435,7 +435,7 @@ function browserOptions(env: Env = process.env) {
   return {
     keepAlive: true,
     maxCostUsd: Number(env.BROWSER_USE_MAX_COST_USD ?? 2),
-    timeoutMs: 285_000,
+    timeoutMs: 240_000,
   };
 }
 
@@ -649,6 +649,28 @@ async function handleJobFailure(
   message: string,
   options: ProcessFoodrunJobsOptions & { store: FoodrunJobStore },
 ): Promise<void> {
+  if (job.kind === "restaurant_search") {
+    const session = await options.store.getOrderSession(job.roomId);
+    const cuisine = session?.confirmedPreferences.cuisines?.[0] ?? "that cuisine";
+
+    await options.store.updateOrderSession(job.roomId, { state: "confirming_preferences" });
+    await options.store.appendEvent({
+      roomId: job.roomId,
+      eventType: "browser_use_restaurant_search_failed",
+      payload: { error: message, jobKind: job.kind },
+    });
+    await notify(
+      job,
+      options,
+      [
+        "Status: restaurant search blocked.",
+        `I couldn't verify a currently open ${cuisine} restaurant that is accepting online orders before the browser search timed out.`,
+        "How about another open cuisine nearby, or send me a specific restaurant ordering URL?",
+      ].join("\n"),
+    );
+    return;
+  }
+
   if (job.kind === "cart_build") {
     const session = await options.store.getOrderSession(job.roomId);
     const restaurantName = session?.selectedRestaurant?.name ?? "the restaurant";

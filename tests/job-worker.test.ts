@@ -143,6 +143,45 @@ describe("processFoodrunJobs", () => {
     });
   });
 
+  test("notifies requester when restaurant availability search times out", async () => {
+    const { store, calls } = createStore({ jobs: [job()] });
+    const sent: unknown[] = [];
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("Session timed out while checking restaurant availability");
+      },
+      buildCart: async () => {
+        throw new Error("buildCart should not run when search fails");
+      },
+    };
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await expect(
+      processFoodrunJobs(1, { store, browser, notifier }),
+    ).resolves.toMatchObject({ processed: 1 });
+    expect(calls.find((call) => call.method === "failJob")?.input).toMatchObject({
+      jobId: "job_123",
+    });
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      roomId: "room_123",
+      state: "confirming_preferences",
+    });
+    expect(calls.find((call) => call.method === "appendEvent")?.input).toMatchObject({
+      eventType: "browser_use_restaurant_search_failed",
+    });
+    expect(sent[0]).toMatchObject({
+      body: [
+        "Status: restaurant search blocked.",
+        "I couldn't verify a currently open Thai restaurant that is accepting online orders before the browser search timed out.",
+        "How about another open cuisine nearby, or send me a specific restaurant ordering URL?",
+      ].join("\n"),
+    });
+  });
+
   test("builds a cart and notifies the requester", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
@@ -166,7 +205,7 @@ describe("processFoodrunJobs", () => {
       },
       buildCart: async (_criteria, _restaurant, options) => {
         expect(options?.sessionId).toBeUndefined();
-        expect(options?.timeoutMs).toBe(285_000);
+        expect(options?.timeoutMs).toBe(240_000);
 
         return {
         sessionId: "browser_cart_123",

@@ -235,12 +235,16 @@ Safety rails:
 - Stop before checkout if ordering requires login, payment, or order placement.
 
 Cartability requirements:
+- First run an availability scan. Check hours/open status and online-order availability before evaluating menu fit.
 - Prefer restaurants with direct online ordering that lets a guest add items and view a cart before login or payment.
 - Prefer Toast first, then Square, ChowNow, BentoBox, Shopify, or an official restaurant ordering page.
 - Avoid DoorDash, Uber Eats, Grubhub, and other marketplaces unless no direct ordering option exists.
 - Check the ordering page immediately for "currently not accepting orders", "closed", unavailable pickup, or disabled add-to-cart controls.
 - Do not return restaurants that are not currently accepting online orders for the requested pickup/delivery mode.
-- If a restaurant looks good but its cart cannot be built as a guest, skip it and try another restaurant.
+- Spend no more than about 30 seconds on any single restaurant before moving to another candidate.
+- Check at least 3 direct-ordering candidates when possible before concluding the requested cuisine has no availability.
+- If a restaurant looks good but is closed, not currently accepting orders, or its cart cannot be built as a guest, skip it and try another restaurant.
+- If no ${cuisine} restaurant is currently accepting online orders, return the best currently accepting nearby alternative cuisine instead. In "reason", explicitly say no currently accepting ${cuisine} option was found and why this alternative is open/orderable.
 - Return the most cartable option first because the next step will build a sample cart from the first result.
 
 Search criteria:
