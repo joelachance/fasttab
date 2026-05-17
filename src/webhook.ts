@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { AgentPhoneClient } from "agentphone";
 
 import { envWithDefault, requiredEnv, type Env } from "./env.js";
+import { OrderSessionStore } from "./foodrun/order-session-store.js";
 import {
   handleFoodrunTextMessage,
   type FoodrunTextIntakeResult,
@@ -66,6 +67,8 @@ export type AgentPhoneTextSender = {
 export type AgentPhoneWebhookHandlerOptions = {
   textSender?: AgentPhoneTextSender;
   textIntake?: (input: FoodrunTextMessage) => Promise<FoodrunTextIntakeResult>;
+  webhookId?: string;
+  webhookStore?: Pick<OrderSessionStore, "recordWebhookDelivery">;
   env?: Env;
 };
 
@@ -166,12 +169,17 @@ export async function handleAgentPhoneWebhook(
     return Response.json({ ok: true, ignored: true });
   }
 
-  console.log("AgentPhone message", {
-    agentId: payload.agentId,
-    channel: payload.channel,
-    from: payload.data.from,
-    conversationId: payload.data.conversationId,
-  });
+  const direction = stringField(payload.data, "direction");
+
+  if (direction && direction !== "inbound") {
+    console.log("Ignoring non-inbound AgentPhone message", {
+      agentId: payload.agentId,
+      channel: payload.channel,
+      direction,
+      conversationId: payload.data.conversationId,
+    });
+    return Response.json({ ok: true, ignored: true, reason: "outbound" });
+  }
 
   const fromNumber = stringField(payload.data, "from", "fromNumber", "from_number");
   const numberId = stringField(
@@ -186,9 +194,46 @@ export async function handleAgentPhoneWebhook(
     return Response.json({ ok: true, ignored: true });
   }
 
-  const body = stringField(payload.data, "body", "text", "message", "content") ?? "";
+  const body = extractInboundMessageText(payload.data, payload.recentHistory);
   const roomId = stringField(payload.data, "conversationId", "conversation_id") ?? `${payload.agentId}-${fromNumber}`;
   const messageId = stringField(payload.data, "messageId", "message_id");
+
+  console.log("AgentPhone message", {
+    agentId: payload.agentId,
+    channel: payload.channel,
+    from: fromNumber,
+    conversationId: roomId,
+    direction: direction ?? "inbound",
+    bodyLength: body.length,
+  });
+
+  if (!body.trim()) {
+    console.log("Ignoring AgentPhone message with no text content", {
+      agentId: payload.agentId,
+      conversationId: roomId,
+    });
+    return Response.json({ ok: true, ignored: true, reason: "empty_message" });
+  }
+
+  const webhookStore = options.webhookStore ?? new OrderSessionStore(options.env);
+
+  if (options.webhookId) {
+    const isNew = await webhookStore.recordWebhookDelivery({
+      webhookId: options.webhookId,
+      eventType: payload.event,
+      roomId,
+      payload: {
+        channel: payload.channel,
+        messageId,
+        fromNumber,
+      },
+    });
+
+    if (!isNew) {
+      return Response.json({ ok: true, duplicate: true });
+    }
+  }
+
   let reply = "Hi, this is your FastTab agent. What would you like to order?";
 
   try {
@@ -220,7 +265,39 @@ export async function handleAgentPhoneWebhook(
     return Response.json({ ok: true, replySent: false });
   }
 
-  return Response.json({ ok: true, replySent: true });
+  return Response.json({ ok: true, replySent: true, response: reply });
+}
+
+export function extractInboundMessageText(
+  data: Record<string, unknown>,
+  recentHistory?: Array<Record<string, unknown>>,
+): string {
+  const direct = stringField(data, "message", "body", "text", "content", "transcript");
+
+  if (direct) {
+    return direct;
+  }
+
+  if (!recentHistory?.length) {
+    return "";
+  }
+
+  for (let index = recentHistory.length - 1; index >= 0; index -= 1) {
+    const item = recentHistory[index];
+    const itemDirection = typeof item.direction === "string" ? item.direction : undefined;
+
+    if (itemDirection && itemDirection !== "inbound") {
+      continue;
+    }
+
+    const content = stringField(item, "content", "message", "body", "text");
+
+    if (content) {
+      return content;
+    }
+  }
+
+  return "";
 }
 
 function isTextChannel(channel: AgentPhoneChannel): channel is AgentPhoneTextChannel {

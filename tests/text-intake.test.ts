@@ -15,13 +15,14 @@ function createFakeStore(
   calls: Array<{ method: string; input: unknown }>;
 } {
   const calls: Array<{ method: string; input: unknown }> = [];
+  let currentSession: Awaited<ReturnType<FoodrunTextStore["createOrderSession"]>> | null = null;
 
   return {
     calls,
     store: {
       createOrderSession: async (input) => {
         calls.push({ method: "createOrderSession", input });
-        return {
+        currentSession = {
           roomId: input.roomId,
           state,
           initiatorPhoneNumber: input.initiatorPhoneNumber,
@@ -32,10 +33,12 @@ function createFakeStore(
           updatedAt: new Date("2026-05-17T18:00:00.000Z"),
           ...sessionOverrides,
         };
+
+        return currentSession;
       },
-      getOrderSession: async () => {
-        calls.push({ method: "getOrderSession", input: undefined });
-        return null;
+      getOrderSession: async (roomId) => {
+        calls.push({ method: "getOrderSession", input: roomId });
+        return currentSession?.roomId === roomId ? currentSession : null;
       },
       upsertParticipant: async (input) => {
         calls.push({ method: "upsertParticipant", input });
@@ -66,6 +69,16 @@ describe("text intake", () => {
       dietary: ["vegetarian"],
       allergies: ["peanuts"],
       budgetPerPersonCents: 2000,
+    });
+  });
+
+  test("extracts cookie requests and street addresses", () => {
+    expect(
+      extractPreferenceFacts("I want Insomnia Cookies delivery to 506 20th St, San Francisco, CA 94107"),
+    ).toEqual({
+      cuisines: ["Insomnia Cookies", "Cookies"],
+      location: "506 20th St, San Francisco, CA 94107",
+      pickupOrDelivery: "delivery",
     });
   });
 
@@ -117,11 +130,12 @@ describe("text intake", () => {
     expect(result.state).toBe("confirming_preferences");
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
       "updateOrderSession",
     ]);
-    expect(calls[3]?.input).toMatchObject({
+    expect(calls[4]?.input).toMatchObject({
       roomId: "conv_123",
       state: "confirming_preferences",
       confirmedPreferences: {
@@ -159,12 +173,13 @@ describe("text intake", () => {
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
       "updateOrderSession",
       "enqueueJob",
     ]);
-    expect(calls[4]?.input).toMatchObject({
+    expect(calls[5]?.input).toMatchObject({
       roomId: "conv_123",
       kind: "restaurant_search",
       payload: {
@@ -195,6 +210,7 @@ describe("text intake", () => {
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
     ]);
@@ -220,6 +236,7 @@ describe("text intake", () => {
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
     ]);
@@ -261,12 +278,13 @@ describe("text intake", () => {
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
       "updateOrderSession",
       "enqueueJob",
     ]);
-    expect(calls[3]?.input).toMatchObject({
+    expect(calls[4]?.input).toMatchObject({
       roomId: "conv_123",
       state: "searching_restaurants",
       selectedRestaurant: null,
@@ -278,7 +296,7 @@ describe("text intake", () => {
         notes: ["vegetarian", "Previous option rejected: Thai Basil Cart. Try a different restaurant."],
       },
     });
-    expect(calls[4]?.input).toMatchObject({
+    expect(calls[5]?.input).toMatchObject({
       roomId: "conv_123",
       kind: "restaurant_search",
     });
@@ -309,12 +327,13 @@ describe("text intake", () => {
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
       "updateOrderSession",
       "enqueueJob",
     ]);
-    expect(calls[4]?.input).toMatchObject({
+    expect(calls[5]?.input).toMatchObject({
       roomId: "conv_123",
       kind: "cart_build",
     });
@@ -345,12 +364,13 @@ describe("text intake", () => {
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
       "updateOrderSession",
       "enqueueJob",
     ]);
-    expect(calls[4]?.input).toMatchObject({
+    expect(calls[5]?.input).toMatchObject({
       roomId: "conv_123",
       kind: "cart_build",
     });
@@ -388,12 +408,13 @@ describe("text intake", () => {
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
       "updateOrderSession",
       "enqueueJob",
     ]);
-    expect(calls[4]?.input).toMatchObject({
+    expect(calls[5]?.input).toMatchObject({
       roomId: "conv_123",
       kind: "cart_build",
     });
@@ -428,6 +449,7 @@ describe("text intake", () => {
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
+      "getOrderSession",
       "upsertParticipant",
       "appendEvent",
     ]);

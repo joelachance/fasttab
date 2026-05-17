@@ -38,7 +38,9 @@ export default async function handler(
 
   try {
     const payload = parseAgentPhoneWebhook(rawBody);
-    const response = await handleAgentPhoneWebhook(payload);
+    const response = await handleAgentPhoneWebhook(payload, {
+      webhookId: headerValue(req.headers["x-webhook-id"]),
+    });
     await sendResponse(res, response);
   } catch (error) {
     console.error("AgentPhone webhook failed", error);

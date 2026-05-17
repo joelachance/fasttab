@@ -11,7 +11,7 @@ export default async function handler(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  if (req.method !== "POST") {
+  if (req.method !== "POST" && req.method !== "GET") {
     sendJson(res, 405, { error: "Method not allowed" });
     return;
   }

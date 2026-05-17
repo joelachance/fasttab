@@ -42,12 +42,17 @@ export async function handleFoodrunTextMessage(
   const store = options.store ?? new OrderSessionStore();
   const extracted = extractPreferenceFacts(input.body);
 
-  const session = await store.createOrderSession({
+  await store.createOrderSession({
     roomId: input.roomId,
     initiatorPhoneNumber: input.fromNumber,
     originalPrompt: input.body,
     state: "collecting_preferences",
   });
+  const session = await store.getOrderSession(input.roomId);
+
+  if (!session) {
+    throw new Error(`Order session missing after create: ${input.roomId}`);
+  }
   await store.upsertParticipant({
     roomId: input.roomId,
     phoneNumber: input.fromNumber,
@@ -206,6 +211,9 @@ export function extractPreferenceFacts(text: string): ConfirmedPreferences {
     ["gluten", /\b(no|allergic to|allergy to|without)\s+gluten\b|\bgluten allergy\b/],
   ]);
   const cuisines = uniqueMatches(lower, [
+    ["Insomnia Cookies", /\binsomnia cookies\b/],
+    ["Cookies", /\bcookies?\b/],
+    ["Dessert", /\bdesserts?\b|\bsweets?\b|\bbaker(?:y|ies)\b|\bice cream\b/],
     ["Thai", /\bthai\b/],
     ["Indian", /\bindian\b/],
     ["Chinese", /\bchinese\b/],
@@ -308,11 +316,25 @@ function uniqueMatches(text: string, patterns: Array<[string, RegExp]>): string[
 }
 
 function extractLocation(text: string): string | undefined {
+  const streetAddress = extractStreetAddress(text);
+
+  if (streetAddress) {
+    return streetAddress;
+  }
+
   const match = text.match(
     /\b(?:near|around|in|at|deliver(?:y)? to)\s+([^.!?\n,]+(?:\s+[^.!?\n,]+){0,4})/i,
   );
 
   return match?.[1]?.trim();
+}
+
+function extractStreetAddress(text: string): string | undefined {
+  const match = text.match(
+    /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,4}(?:,\s*[A-Za-z .'-]+)?(?:,\s*[A-Z]{2})?(?:\s+\d{5})?\b/,
+  );
+
+  return match?.[0]?.trim();
 }
 
 function extractBudgetPerPersonCents(text: string): number | undefined {

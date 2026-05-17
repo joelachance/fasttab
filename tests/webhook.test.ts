@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { handleAgentPhoneWebhook, type AgentPhoneWebhookPayload } from "../src/webhook";
+import {
+  extractInboundMessageText,
+  handleAgentPhoneWebhook,
+  type AgentPhoneWebhookPayload,
+} from "../src/webhook";
 
 async function json(response: Response) {
   return response.json() as Promise<Record<string, unknown>>;
@@ -17,7 +21,8 @@ describe("handleAgentPhoneWebhook", () => {
         from: "+15551234567",
         phoneNumberId: "num_123",
         conversationId: "conv_123",
-        body: "thai food",
+        message: "thai food",
+        direction: "inbound",
       },
     };
 
@@ -46,7 +51,11 @@ describe("handleAgentPhoneWebhook", () => {
           },
         }),
       ),
-    ).resolves.toEqual({ ok: true, replySent: true });
+    ).resolves.toEqual({
+      ok: true,
+      replySent: true,
+      response: "Hi, this is your FastTab agent. What would you like to order?",
+    });
     expect(sent).toEqual([
       {
         agentId: "agent_123",
@@ -80,7 +89,8 @@ describe("handleAgentPhoneWebhook", () => {
       agentId: "agent_123",
       data: {
         from: "+15551234567",
-        body: "thai food",
+        message: "thai food",
+        direction: "inbound",
       },
     };
 
@@ -100,6 +110,43 @@ describe("handleAgentPhoneWebhook", () => {
         }),
       ),
     ).resolves.toEqual({ ok: true, replySent: false });
+  });
+
+  test("ignores outbound message echoes", async () => {
+    const sent: unknown[] = [];
+    const payload: AgentPhoneWebhookPayload = {
+      event: "agent.message",
+      channel: "imessage",
+      agentId: "agent_123",
+      data: {
+        from: "+15551234567",
+        conversationId: "conv_123",
+        message: "Hi, this is your FastTab agent. What would you like to order?",
+        direction: "outbound",
+      },
+    };
+
+    await expect(
+      json(
+        await handleAgentPhoneWebhook(payload, {
+          textSender: {
+            sendText: async (input) => {
+              sent.push(input);
+            },
+          },
+        }),
+      ),
+    ).resolves.toEqual({ ok: true, ignored: true, reason: "outbound" });
+    expect(sent).toEqual([]);
+  });
+
+  test("reads inbound text from recentHistory when message field is empty", async () => {
+    expect(
+      extractInboundMessageText(
+        { direction: "inbound" },
+        [{ content: "Thai near Mission", direction: "inbound", channel: "imessage" }],
+      ),
+    ).toBe("Thai near Mission");
   });
 
   test("ignores call-ended events for text-only mode", async () => {
