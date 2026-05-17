@@ -19,6 +19,9 @@ export default function Home() {
     <main className="site-shell">
       <header className="site-header">
         <a href="/">{content.siteTitle}</a>
+        <a className="header-cta" href={smsHref}>
+          Order Now: {formattedFastTabNumber}
+        </a>
       </header>
 
       <section className="hero" aria-labelledby="hero-title">
