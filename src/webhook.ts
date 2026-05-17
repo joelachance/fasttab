@@ -215,7 +215,7 @@ export async function handleAgentPhoneWebhook(
     return Response.json({ ok: true, ignored: true, reason: "empty_message" });
   }
 
-  const webhookStore = options.webhookStore ?? new OrderSessionStore(options.env);
+  const webhookStore = options.webhookStore ?? new OrderSessionStore();
 
   if (options.webhookId) {
     const isNew = await webhookStore.recordWebhookDelivery({
