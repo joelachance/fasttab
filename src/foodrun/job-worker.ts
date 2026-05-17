@@ -435,7 +435,7 @@ function browserOptions(env: Env = process.env) {
   return {
     keepAlive: true,
     maxCostUsd: Number(env.BROWSER_USE_MAX_COST_USD ?? 2),
-    timeoutMs: 240_000,
+    timeoutMs: 285_000,
   };
 }
 

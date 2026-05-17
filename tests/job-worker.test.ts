@@ -166,6 +166,7 @@ describe("processFoodrunJobs", () => {
       },
       buildCart: async (_criteria, _restaurant, options) => {
         expect(options?.sessionId).toBeUndefined();
+        expect(options?.timeoutMs).toBe(285_000);
 
         return {
         sessionId: "browser_cart_123",
