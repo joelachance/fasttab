@@ -7,7 +7,10 @@ import {
   type FoodrunTextStore,
 } from "../src/foodrun/text-intake";
 
-function createFakeStore(state = "collecting_preferences"): {
+function createFakeStore(
+  state = "collecting_preferences",
+  sessionOverrides: Record<string, unknown> = {},
+): {
   store: FoodrunTextStore;
   calls: Array<{ method: string; input: unknown }>;
 } {
@@ -27,6 +30,7 @@ function createFakeStore(state = "collecting_preferences"): {
           stripePaymentLinks: [],
           createdAt: new Date("2026-05-17T18:00:00.000Z"),
           updatedAt: new Date("2026-05-17T18:00:00.000Z"),
+          ...sessionOverrides,
         };
       },
       getOrderSession: async () => {
@@ -222,7 +226,11 @@ describe("text intake", () => {
   });
 
   test("retries cart building from the selected restaurant state", async () => {
-    const { store, calls } = createFakeStore("selecting_restaurant");
+    const { store, calls } = createFakeStore("selecting_restaurant", {
+      selectedRestaurant: {
+        name: "Thai Basil Cart",
+      },
+    });
 
     const result = await handleFoodrunTextMessage(
       {
@@ -230,6 +238,41 @@ describe("text intake", () => {
         agentId: "agent_123",
         fromNumber: "+15551234567",
         body: "retry cart",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result).toMatchObject({
+      state: "building_cart",
+      reply: "I'll retry building the FastTab draft cart.",
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "createOrderSession",
+      "upsertParticipant",
+      "appendEvent",
+      "updateOrderSession",
+      "enqueueJob",
+    ]);
+    expect(calls[4]?.input).toMatchObject({
+      roomId: "conv_123",
+      kind: "cart_build",
+    });
+  });
+
+  test("retries cart building when a restaurant is selected even if state drifted", async () => {
+    const { store, calls } = createFakeStore("confirming_preferences", {
+      selectedRestaurant: {
+        name: "Thai Basil Cart",
+      },
+    });
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "Retry cart",
         channel: "imessage",
       },
       { store, memory: null },

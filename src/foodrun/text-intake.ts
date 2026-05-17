@@ -66,15 +66,7 @@ export async function handleFoodrunTextMessage(
     },
   });
 
-  if (isBusy(session.state)) {
-    return {
-      reply: "I'm still working on that FastTab step. I'll text you when the draft cart is ready.",
-      state: session.state,
-      extracted,
-    };
-  }
-
-  if (session.state === "selecting_restaurant" && isRetryCart(input.body)) {
+  if (canRetryCart(session, input.body)) {
     await store.updateOrderSession(input.roomId, { state: "building_cart" });
     await store.enqueueJob({
       roomId: input.roomId,
@@ -85,6 +77,14 @@ export async function handleFoodrunTextMessage(
     return {
       reply: "I'll retry building the FastTab draft cart.",
       state: "building_cart",
+      extracted,
+    };
+  }
+
+  if (isBusy(session.state)) {
+    return {
+      reply: "I'm still working on that FastTab step. I'll text you when the draft cart is ready.",
+      state: session.state,
       extracted,
     };
   }
@@ -296,6 +296,10 @@ function isRetryCart(text: string): boolean {
   return /\b(retry|try again|rebuild|build)\b.*\bcart\b|\bcart\b.*\b(retry|again|rebuild)\b/i.test(
     text.trim(),
   );
+}
+
+function canRetryCart(session: { selectedRestaurant?: unknown; cart?: unknown }, text: string): boolean {
+  return Boolean(session.selectedRestaurant && !session.cart && isRetryCart(text));
 }
 
 function isBusy(state: string): boolean {
