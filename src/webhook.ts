@@ -50,7 +50,12 @@ export type WebhookHeaders = {
 };
 
 export type AgentPhoneTextSender = {
-  sendText(input: { agentId: string; toNumber: string; body: string }): Promise<unknown>;
+  sendText(input: {
+    agentId: string;
+    toNumber: string;
+    body: string;
+    numberId?: string;
+  }): Promise<unknown>;
 };
 
 export type AgentPhoneWebhookHandlerOptions = {
@@ -68,12 +73,20 @@ class AgentPhoneSdkTextSender implements AgentPhoneTextSender {
     });
   }
 
-  sendText(input: { agentId: string; toNumber: string; body: string }): Promise<unknown> {
-    return this.client.messages.sendMessage({
+  sendText(input: {
+    agentId: string;
+    toNumber: string;
+    body: string;
+    numberId?: string;
+  }): Promise<unknown> {
+    const request = {
       agent_id: input.agentId,
       to_number: input.toNumber,
       body: input.body,
-    });
+      number_id: input.numberId,
+    };
+
+    return this.client.messages.sendMessage(request);
   }
 }
 
@@ -155,6 +168,13 @@ export async function handleAgentPhoneWebhook(
   });
 
   const fromNumber = stringField(payload.data, "from", "fromNumber", "from_number");
+  const numberId = stringField(
+    payload.data,
+    "phoneNumberId",
+    "phone_number_id",
+    "numberId",
+    "number_id",
+  );
 
   if (!fromNumber) {
     return Response.json({ ok: true, ignored: true });
@@ -172,6 +192,7 @@ export async function handleAgentPhoneWebhook(
       agentId: payload.agentId,
       toNumber: fromNumber,
       body: reply,
+      numberId,
     });
   } catch (error) {
     console.error("AgentPhone reply failed", error);
