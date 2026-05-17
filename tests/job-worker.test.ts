@@ -89,6 +89,7 @@ function createStore(input: {
 describe("processFoodrunJobs", () => {
   test("runs restaurant search and enqueues cart build", async () => {
     const { store, calls } = createStore({ jobs: [job()] });
+    const sent: unknown[] = [];
     const browser: FoodrunBrowserUse = {
       searchRestaurants: async (criteria) => {
         expect(criteria).toMatchObject({
@@ -116,9 +117,14 @@ describe("processFoodrunJobs", () => {
         throw new Error("buildCart should run in the cart_build job");
       },
     };
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
 
     await expect(
-      processFoodrunJobs(1, { store, browser, notifier: null }),
+      processFoodrunJobs(1, { store, browser, notifier }),
     ).resolves.toMatchObject({ processed: 1 });
     expect(calls[0]).toMatchObject({
       method: "updateOrderSession",
@@ -131,6 +137,9 @@ describe("processFoodrunJobs", () => {
     expect(calls.find((call) => call.method === "enqueueJob")?.input).toMatchObject({
       roomId: "room_123",
       kind: "cart_build",
+    });
+    expect(sent[0]).toMatchObject({
+      body: "I found Mission Thai. I'm building a draft cart now.",
     });
   });
 

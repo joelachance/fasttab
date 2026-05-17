@@ -201,6 +201,7 @@ async function searchRestaurants(
     kind: "cart_build",
     payload: job.payload,
   });
+  await notify(job, options, formatRestaurantFoundText(restaurant));
 }
 
 async function buildCart(
@@ -478,6 +479,12 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function formatRestaurantFoundText(restaurant: RestaurantOption): string {
+  const pickup = restaurant.estimatedPickupTime ? ` Pickup estimate: ${restaurant.estimatedPickupTime}.` : "";
+
+  return `I found ${restaurant.name}.${pickup} I'm building a draft cart now.`;
 }
 
 function formatPaymentLinkText(amountCents: number, url: string): string {
