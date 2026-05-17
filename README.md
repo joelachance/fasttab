@@ -5,6 +5,10 @@ TypeScript starter for wiring Fasttab to AgentPhone with a local webhook server 
 ## What is here
 
 - `src/modules/agent-mail/` sends demo confirmation emails through the AgentMail SDK.
+- `src/modules/stripe/` — Payment Links per participant; Issuing cardholder + spend-limited virtual card
+- `src/modules/checkout-stub/` — fake DoorDash checkout for demos
+- `src/modules/split-bill/` — parse split prompts → line items
+- `src/foodrun/collect-splits.ts` — end-to-end demo orchestrator
 - `src/modules/sponge/` issues food-order virtual cards through the Sponge SDK.
 - `src/modules/supermemory.ts` stores and retrieves food preferences by phone number through the Supermemory SDK.
 
@@ -44,6 +48,14 @@ Set `AGENTPHONE_PROVISION_NUMBER=true` before running setup only if you want the
 
 ## Usage
 
+Create Stripe test-mode payment links for a split bill:
+
+```bash
+bun run demo:collect -- 'Split $92.17 from Demo Thai between +1YOU +1FRIEND' --dry-run-sms
+```
+
+Single phone works and assigns the entire bill to one link. Use single quotes so the shell does not strip `$92.17`. Pay links with test card `4242 4242 4242 4242`.
+
 Run the local webhook server:
 
 ```bash
@@ -82,6 +94,16 @@ Vercel rewrites are configured in `vercel.json`:
 ```
 
 Use `/health` to verify the deployment is reachable before registering the webhook.
+
+## Architecture
+
+| Concern | Product | File |
+|--------|---------|------|
+| Collect each person's share | Stripe Payment Links | `payment-links.ts` |
+| Agent pays merchant (future) | Stripe Issuing virtual card | `issuing.ts` |
+| Fake DoorDash | Local stub | `checkout-stub/` |
+| Parse inbound split text | Regex + Zod JSON | `split-bill/` |
+| Demo pipeline | Orchestrator | `foodrun/collect-splits.ts` |
 
 ## Configuration
 

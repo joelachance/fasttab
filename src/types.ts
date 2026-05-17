@@ -1,5 +1,12 @@
 export type Money = { currency: "usd"; cents: number };
 
+export type SplitLineItem = {
+  participantId: string;
+  phoneNumber: string;
+  amount: Money;
+  description: string;
+};
+
 export type LocationHint = {
   raw: string;
   latitude?: number;
