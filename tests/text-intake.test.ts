@@ -297,6 +297,49 @@ describe("text intake", () => {
     });
   });
 
+  test("retries cart building when the existing cart is blocked", async () => {
+    const { store, calls } = createFakeStore("confirming_cart", {
+      selectedRestaurant: {
+        name: "Thai Basil Cart",
+      },
+      cart: {
+        restaurantName: "Thai Basil Cart",
+        items: [],
+        screenshots: [],
+        status: "blocked",
+        blockers: ["Task stopped before checkout"],
+      },
+    });
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "Retry cart",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result).toMatchObject({
+      state: "building_cart",
+      reply:
+        "Status: retrying cart. I'll text you when the draft cart is ready, or if checkout blocks me.",
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "createOrderSession",
+      "upsertParticipant",
+      "appendEvent",
+      "updateOrderSession",
+      "enqueueJob",
+    ]);
+    expect(calls[4]?.input).toMatchObject({
+      roomId: "conv_123",
+      kind: "cart_build",
+    });
+  });
+
   test("does not confirm a blocked cart", async () => {
     const { store, calls } = createFakeStore("confirming_cart", {
       cart: {

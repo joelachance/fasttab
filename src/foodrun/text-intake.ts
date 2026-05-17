@@ -309,7 +309,11 @@ function isRetryCart(text: string): boolean {
 }
 
 function canRetryCart(session: { selectedRestaurant?: unknown; cart?: unknown }, text: string): boolean {
-  return Boolean(session.selectedRestaurant && !session.cart && isRetryCart(text));
+  return Boolean(
+    session.selectedRestaurant &&
+      (!session.cart || cartStatus(session.cart) === "blocked") &&
+      isRetryCart(text),
+  );
 }
 
 function cartStatus(cart: unknown): string | undefined {
