@@ -50,6 +50,8 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("https://example.com/order");
     expect(prompt).toContain("Return raw JSON only");
     expect(prompt).toContain('"status": "blocked"');
+    expect(prompt).toContain("internal draft cart is acceptable");
+    expect(prompt).toContain('"status": "draft"');
     expect(prompt).toContain("Do not answer with prose");
     expect(prompt).toContain("Task stopped");
   });

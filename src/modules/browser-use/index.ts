@@ -273,8 +273,11 @@ Build a takeout cart for the group and stop before payment. Return raw JSON only
 
 Safety rails:
 - Do not place the order. Do not enter payment information.
-- If checkout requires login, payment, unavailable items, or any site blocker, stop and report the blocker in the JSON object.
-- If you cannot complete the cart for any reason, still return the JSON object with "status": "blocked", any items you found, and blockers explaining what happened.
+- Prefer a real website cart when possible, but an internal draft cart is acceptable.
+- If checkout requires login, payment, unavailable items, or another site blocker, still build a draft cart from visible menu items before reporting the blocker.
+- Use "status": "draft" when you found plausible menu items but could not make a checkout-ready website cart.
+- Use "status": "blocked" only when you cannot find enough menu information to choose items.
+- If you cannot complete the website cart for any reason, still return the JSON object with any items you found and blockers explaining what happened.
 - Do not answer with prose, markdown, comments, or a "Task stopped" sentence.
 - Your final response must be parseable JSON matching the shape below.
 
@@ -291,9 +294,9 @@ Order context:
 Output rules:
 - Return exactly one JSON object and nothing else.
 - Use "status": "checkout_ready" only when the cart is built and ready for user confirmation.
-- Use "status": "draft" when you have a partial cart but it is not checkout-ready.
-- Use "status": "blocked" when login, payment, unavailable menu access, or another blocker prevents cart completion.
-- In blocked cases, "items" may be empty, but "blockers" must explain the blocker.
+- Use "status": "draft" when you have a reasonable internal cart but it is not checkout-ready on the website.
+- Use "status": "blocked" only when menu access or another blocker prevents choosing items.
+- In draft or blocked cases, "blockers" must explain what prevented a checkout-ready cart.
 
 Return JSON shaped like:
 {
