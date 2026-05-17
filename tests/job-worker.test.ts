@@ -207,7 +207,7 @@ describe("processFoodrunJobs", () => {
     });
   });
 
-  test("moves failed cart builds into a retryable state and notifies the requester", async () => {
+  test("falls back to an internal draft cart when browser cart building fails", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
       state: "building_cart",
@@ -241,6 +241,49 @@ describe("processFoodrunJobs", () => {
     await expect(
       processFoodrunJobs(1, { store, browser, notifier }),
     ).resolves.toMatchObject({ processed: 1 });
+    expect(calls.find((call) => call.method === "completeJob")?.input).toBe("job_123");
+    expect(calls.find((call) => call.method === "failJob")).toBeUndefined();
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      roomId: "room_123",
+      state: "confirming_cart",
+      browserUseSessionId: "internal_draft_cart",
+      cart: {
+        restaurantName: "Mission Thai",
+        status: "draft",
+        items: [{ name: "Green curry with tofu", quantity: 1 }],
+      },
+    });
+    expect(sent[0]).toMatchObject({
+      body: [
+        "Status: draft cart ready.",
+        "I built a FastTab draft cart at Mission Thai. Estimated total: $20.00.",
+        "Items: 1x Green curry with tofu",
+        'Blocked by: Browser Use could not create a checkout-ready website cart, so FastTab built an internal draft cart., Unexpected token "T", "Task stopp"... is not valid JSON',
+        "Reply with changes, or reply 'confirm order' to continue.",
+      ].join("\n"),
+    });
+  });
+
+  test("moves cart builds without a restaurant into a retryable state and notifies the requester", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      browserUseSessionId: "browser_search_123",
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "cart_build" })],
+      session,
+    });
+    const sent: unknown[] = [];
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await expect(
+      processFoodrunJobs(1, { store, notifier }),
+    ).resolves.toMatchObject({ processed: 1 });
     expect(calls.find((call) => call.method === "failJob")?.input).toMatchObject({
       jobId: "job_123",
     });
@@ -251,14 +294,14 @@ describe("processFoodrunJobs", () => {
     expect(sent[0]).toMatchObject({
       body: [
         "Status: cart retry needed.",
-        "I found Mission Thai, but couldn't build a draft cart yet.",
-        'Reason: Unexpected token "T", "Task stopp"... is not valid JSON',
+        "I found the restaurant, but couldn't build a draft cart yet.",
+        "Reason: No restaurant selected for cart build",
         "Reply 'retry cart' and I'll try again.",
       ].join("\n"),
     });
   });
 
-  test("texts blocked cart status instead of inviting confirmation", async () => {
+  test("turns a blocked empty browser cart into an internal draft cart", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
       state: "building_cart",
@@ -300,10 +343,11 @@ describe("processFoodrunJobs", () => {
 
     expect(sent[0]).toMatchObject({
       body: [
-        "Status: cart blocked.",
-        "I could not build a checkout-ready cart at Mission Thai.",
-        "Blocked by: Task stopped before checkout",
-        "Reply 'retry cart' to try again, or send a different restaurant or preference.",
+        "Status: draft cart ready.",
+        "I built a FastTab draft cart at Mission Thai. Estimated total: $20.00.",
+        "Items: 1x Green curry with tofu",
+        "Blocked by: Browser Use could not create a checkout-ready website cart, so FastTab built an internal draft cart., Task stopped before checkout",
+        "Reply with changes, or reply 'confirm order' to continue.",
       ].join("\n"),
     });
   });

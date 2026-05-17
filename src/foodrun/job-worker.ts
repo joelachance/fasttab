@@ -217,7 +217,7 @@ async function buildCart(
   const participants = await options.store.listParticipants(job.roomId);
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const criteria = buildOrderCriteria(session, participants);
-  const cart = await browser.buildCart(criteria, session.selectedRestaurant, {
+  const cart = await buildCartWithFallback(browser, criteria, session.selectedRestaurant, {
     ...browserOptions(options.env),
   });
 
@@ -253,7 +253,7 @@ async function editCart(
   const participants = await options.store.listParticipants(job.roomId);
   const criteria = buildOrderCriteria(session, participants, stringPayload(job, "editText"));
   const browser = options.browser ?? new BrowserUseModule(options.env);
-  const cart = await browser.buildCart(criteria, session.selectedRestaurant, {
+  const cart = await buildCartWithFallback(browser, criteria, session.selectedRestaurant, {
     ...browserOptions(options.env),
   });
 
@@ -437,6 +437,111 @@ function browserOptions(env: Env = process.env) {
     maxCostUsd: Number(env.BROWSER_USE_MAX_COST_USD ?? 2),
     timeoutMs: 285_000,
   };
+}
+
+async function buildCartWithFallback(
+  browser: FoodrunBrowserUse,
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  options: Parameters<FoodrunBrowserUse["buildCart"]>[2],
+): ReturnType<FoodrunBrowserUse["buildCart"]> {
+  try {
+    const cart = await browser.buildCart(criteria, restaurant, options);
+
+    if (cart.output.status === "blocked" && cart.output.items.length === 0) {
+      return {
+        ...cart,
+        output: buildInternalDraftCart(criteria, restaurant, cart.output.blockers),
+        raw: {
+          ...cart.raw,
+          output: buildInternalDraftCart(criteria, restaurant, cart.output.blockers),
+        },
+      };
+    }
+
+    return cart;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const output = buildInternalDraftCart(criteria, restaurant, [message]);
+
+    return {
+      sessionId: "internal_draft_cart",
+      output,
+      raw: {
+        id: "internal_draft_cart",
+        output,
+      } as Awaited<ReturnType<FoodrunBrowserUse["buildCart"]>>["raw"],
+    };
+  }
+}
+
+function buildInternalDraftCart(
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  blockers: string[],
+): CartSummary {
+  const itemCount = Math.max(1, Math.min(criteria.participantCount, 4));
+  const priceCents =
+    restaurant.estimatedTotal?.cents ??
+    criteria.budgetPerPerson?.cents ??
+    1800;
+  const unitPriceCents = Math.max(1, Math.round(priceCents / itemCount));
+  const itemNames = fallbackItemNames(criteria, restaurant);
+  const items = Array.from({ length: itemCount }, (_, index) => ({
+    name: itemNames[index % itemNames.length],
+    quantity: 1,
+    price: { currency: "usd" as const, cents: unitPriceCents },
+    notes: fallbackItemNotes(criteria),
+  }));
+  const subtotalCents = items.reduce((sum, item) => sum + item.price.cents * item.quantity, 0);
+
+  return {
+    restaurantName: restaurant.name,
+    checkoutUrl: restaurant.orderingUrl ?? restaurant.url,
+    items,
+    subtotal: { currency: "usd", cents: subtotalCents },
+    estimatedTotal: { currency: "usd", cents: subtotalCents },
+    screenshots: [],
+    status: "draft",
+    blockers: [
+      "Browser Use could not create a checkout-ready website cart, so FastTab built an internal draft cart.",
+      ...blockers.map(formatFailureReason),
+    ],
+  };
+}
+
+function fallbackItemNames(criteria: OrderCriteria, restaurant: RestaurantOption): string[] {
+  const text = [criteria.cuisine, restaurant.name, restaurant.reason, ...criteria.preferences]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (text.includes("thai")) {
+    return ["Green curry with tofu", "Drunken noodles with tofu", "Vegetable spring rolls"];
+  }
+  if (text.includes("indian")) {
+    return ["Vegetable curry", "Chana masala", "Garlic naan"];
+  }
+  if (text.includes("mexican") || text.includes("taco")) {
+    return ["Vegetarian burrito", "Bean and cheese tacos", "Chips and salsa"];
+  }
+  if (text.includes("pizza") || text.includes("italian")) {
+    return ["Margherita pizza", "Vegetarian pasta", "Caesar salad"];
+  }
+  if (text.includes("sushi") || text.includes("japanese")) {
+    return ["Avocado roll", "Vegetable udon", "Edamame"];
+  }
+
+  return ["Vegetarian entree", "Vegetable side", "Group appetizer"];
+}
+
+function fallbackItemNotes(criteria: OrderCriteria): string | undefined {
+  const notes = [
+    criteria.allergies.length ? `avoid ${criteria.allergies.join(", ")}` : undefined,
+    criteria.preferences.length ? criteria.preferences.join(", ") : undefined,
+  ].filter(Boolean);
+
+  return notes.length ? notes.join("; ") : undefined;
 }
 
 function cartTotalCents(cart: CartSummary | undefined): number | undefined {
