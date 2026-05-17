@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc --noEmit",
     "dev:webhook": "node --env-file=.env.local --import tsx src/server.ts",
     "setup:agentphone": "node --env-file=.env.local --import tsx src/provision.ts",
     "typecheck": "tsc --noEmit"
