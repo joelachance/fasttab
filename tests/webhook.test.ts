@@ -30,7 +30,7 @@ describe("handleAgentPhoneWebhook", () => {
           },
         }),
       ),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, replySent: true });
     expect(sent).toEqual([
       {
         agentId: "agent_123",
@@ -54,6 +54,30 @@ describe("handleAgentPhoneWebhook", () => {
       ok: true,
       ignored: true,
     });
+  });
+
+  test("acknowledges text messages when reply sending fails", async () => {
+    const payload: AgentPhoneWebhookPayload = {
+      event: "agent.message",
+      channel: "sms",
+      agentId: "agent_123",
+      data: {
+        from: "+15551234567",
+        body: "thai food",
+      },
+    };
+
+    await expect(
+      json(
+        await handleAgentPhoneWebhook(payload, {
+          textSender: {
+            sendText: async () => {
+              throw new Error("send failed");
+            },
+          },
+        }),
+      ),
+    ).resolves.toEqual({ ok: true, replySent: false });
   });
 
   test("ignores call-ended events for text-only mode", async () => {

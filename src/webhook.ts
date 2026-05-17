@@ -167,13 +167,18 @@ export async function handleAgentPhoneWebhook(
     : "Foodrun got your text.";
   const sender = options.textSender ?? new AgentPhoneSdkTextSender(options.env);
 
-  await sender.sendText({
-    agentId: payload.agentId,
-    toNumber: fromNumber,
-    body: reply,
-  });
+  try {
+    await sender.sendText({
+      agentId: payload.agentId,
+      toNumber: fromNumber,
+      body: reply,
+    });
+  } catch (error) {
+    console.error("AgentPhone reply failed", error);
+    return Response.json({ ok: true, replySent: false });
+  }
 
-  return Response.json({ ok: true });
+  return Response.json({ ok: true, replySent: true });
 }
 
 function isTextChannel(channel: AgentPhoneChannel): channel is AgentPhoneTextChannel {
