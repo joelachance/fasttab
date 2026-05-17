@@ -206,6 +206,52 @@ describe("processFoodrunJobs", () => {
     });
   });
 
+  test("moves failed cart builds into a retryable state and notifies the requester", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      selectedRestaurant: {
+        name: "Mission Thai",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: ["vegetarian"],
+      },
+      browserUseSessionId: "browser_search_123",
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "cart_build" })],
+      session,
+    });
+    const sent: unknown[] = [];
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run in the cart_build job");
+      },
+      buildCart: async () => {
+        throw new Error('Unexpected token "T", "Task stopp"... is not valid JSON');
+      },
+    };
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await expect(
+      processFoodrunJobs(1, { store, browser, notifier }),
+    ).resolves.toMatchObject({ processed: 1 });
+    expect(calls.find((call) => call.method === "failJob")?.input).toMatchObject({
+      jobId: "job_123",
+    });
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      roomId: "room_123",
+      state: "selecting_restaurant",
+    });
+    expect(sent[0]).toMatchObject({
+      body: "I found Mission Thai, but couldn't build a draft cart yet. Reply 'retry cart' and I'll try again.",
+    });
+  });
+
   test("skips stale restaurant search when a restaurant is already selected", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,

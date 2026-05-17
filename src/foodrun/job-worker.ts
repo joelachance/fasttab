@@ -112,7 +112,7 @@ export async function processFoodrunJobs(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await store.failJob(job.jobId, message);
-      await notifyJobFailure(job, message, options);
+      await handleJobFailure(job, message, { ...options, store });
     }
 
     processed += 1;
@@ -528,6 +528,47 @@ async function notifyJobFailure(
   } catch (error) {
     console.error("Foodrun job failure notification failed", error);
   }
+}
+
+async function handleJobFailure(
+  job: FoodrunJob,
+  message: string,
+  options: ProcessFoodrunJobsOptions & { store: FoodrunJobStore },
+): Promise<void> {
+  if (job.kind === "cart_build") {
+    const session = await options.store.getOrderSession(job.roomId);
+    const restaurantName = session?.selectedRestaurant?.name ?? "the restaurant";
+
+    await options.store.updateOrderSession(job.roomId, { state: "selecting_restaurant" });
+    await options.store.appendEvent({
+      roomId: job.roomId,
+      eventType: "browser_use_cart_failed",
+      payload: { error: message, jobKind: job.kind },
+    });
+    await notify(
+      job,
+      options,
+      `I found ${restaurantName}, but couldn't build a draft cart yet. Reply 'retry cart' and I'll try again.`,
+    );
+    return;
+  }
+
+  if (job.kind === "cart_edit") {
+    await options.store.updateOrderSession(job.roomId, { state: "confirming_cart" });
+    await options.store.appendEvent({
+      roomId: job.roomId,
+      eventType: "browser_use_cart_failed",
+      payload: { error: message, jobKind: job.kind },
+    });
+    await notify(
+      job,
+      options,
+      "I couldn't apply that cart change. Send another change or reply 'retry cart' to rebuild the draft cart.",
+    );
+    return;
+  }
+
+  await notifyJobFailure(job, message, options);
 }
 
 function stringPayload(job: FoodrunJob, key: string): string | undefined {

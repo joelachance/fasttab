@@ -220,4 +220,35 @@ describe("text intake", () => {
       "appendEvent",
     ]);
   });
+
+  test("retries cart building from the selected restaurant state", async () => {
+    const { store, calls } = createFakeStore("selecting_restaurant");
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "retry cart",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result).toMatchObject({
+      state: "building_cart",
+      reply: "I'll retry building the FastTab draft cart.",
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "createOrderSession",
+      "upsertParticipant",
+      "appendEvent",
+      "updateOrderSession",
+      "enqueueJob",
+    ]);
+    expect(calls[4]?.input).toMatchObject({
+      roomId: "conv_123",
+      kind: "cart_build",
+    });
+  });
 });

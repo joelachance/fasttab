@@ -74,6 +74,21 @@ export async function handleFoodrunTextMessage(
     };
   }
 
+  if (session.state === "selecting_restaurant" && isRetryCart(input.body)) {
+    await store.updateOrderSession(input.roomId, { state: "building_cart" });
+    await store.enqueueJob({
+      roomId: input.roomId,
+      kind: "cart_build",
+      payload: jobPayload(input),
+    });
+
+    return {
+      reply: "I'll retry building the FastTab draft cart.",
+      state: "building_cart",
+      extracted,
+    };
+  }
+
   if (session.state === "confirming_cart" && isYes(input.body)) {
     return {
       reply: "Reply 'confirm order' to continue, or send changes to the cart.",
@@ -275,6 +290,12 @@ function extractBudgetPerPersonCents(text: string): number | undefined {
 
 function isYes(text: string): boolean {
   return /^(yes|y|yeah|yep|sure|ok|okay|go|search)$/i.test(text.trim());
+}
+
+function isRetryCart(text: string): boolean {
+  return /\b(retry|try again|rebuild|build)\b.*\bcart\b|\bcart\b.*\b(retry|again|rebuild)\b/i.test(
+    text.trim(),
+  );
 }
 
 function isBusy(state: string): boolean {
