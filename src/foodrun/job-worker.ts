@@ -2,6 +2,7 @@ import { AgentPhoneClient } from "agentphone";
 
 import { envWithDefault, requiredEnv, type Env } from "../env.js";
 import { BrowserUseModule } from "../modules/browser-use/index.js";
+import { RestaurantAvailabilityModule } from "../modules/restaurant-availability.js";
 import { SpongeModule } from "../modules/sponge/index.js";
 import { StripeModule } from "../modules/stripe/index.js";
 import { splitEvenly } from "../modules/split-bill/index.js";
@@ -35,6 +36,10 @@ export type FoodrunJobStore = Pick<
 >;
 
 export type FoodrunBrowserUse = Pick<BrowserUseModule, "searchRestaurants" | "buildCart">;
+export type FoodrunAvailabilityBrowserUse = FoodrunBrowserUse & {
+  verifyRestaurantCandidates?: BrowserUseModule["verifyRestaurantCandidates"];
+};
+export type FoodrunAvailabilityScanner = Pick<RestaurantAvailabilityModule, "findCandidates">;
 export type FoodrunStripe = Pick<StripeModule, "createPaymentLinks">;
 export type FoodrunSponge = Pick<SpongeModule, "issueFoodOrderCard">;
 
@@ -49,7 +54,8 @@ export type FoodrunJobNotifier = {
 
 export type ProcessFoodrunJobsOptions = {
   store?: FoodrunJobStore;
-  browser?: FoodrunBrowserUse;
+  browser?: FoodrunAvailabilityBrowserUse;
+  availabilityScanner?: FoodrunAvailabilityScanner;
   stripe?: FoodrunStripe;
   sponge?: FoodrunSponge;
   notifier?: FoodrunJobNotifier | null;
@@ -173,8 +179,14 @@ async function searchRestaurants(
 
   const participants = await options.store.listParticipants(job.roomId);
   const browser = options.browser ?? new BrowserUseModule(options.env);
+  const availabilityScanner =
+    options.availabilityScanner ?? new RestaurantAvailabilityModule(options.env ?? process.env);
   const criteria = buildOrderCriteria(session, participants);
-  const search = await browser.searchRestaurants(criteria, browserOptions(options.env));
+  const candidates = await availabilityScanner.findCandidates(criteria);
+  const search =
+    candidates.length > 0 && browser.verifyRestaurantCandidates ?
+      await browser.verifyRestaurantCandidates(criteria, candidates, availabilityBrowserOptions(options.env))
+    : await browser.searchRestaurants(criteria, availabilityBrowserOptions(options.env));
   const restaurant = search.output.restaurants[0];
 
   if (!restaurant) {
@@ -192,6 +204,7 @@ async function searchRestaurants(
     eventType: "browser_use_restaurant_selected",
     payload: {
       restaurant,
+      candidates,
       browserUseSessionId: search.sessionId,
       browserUseLiveUrl: search.liveUrl,
     },
@@ -436,6 +449,13 @@ function browserOptions(env: Env = process.env) {
     keepAlive: true,
     maxCostUsd: Number(env.BROWSER_USE_MAX_COST_USD ?? 2),
     timeoutMs: 240_000,
+  };
+}
+
+function availabilityBrowserOptions(env: Env = process.env) {
+  return {
+    ...browserOptions(env),
+    timeoutMs: 210_000,
   };
 }
 

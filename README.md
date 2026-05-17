@@ -11,6 +11,7 @@ TypeScript starter for wiring Fasttab to AgentPhone text messaging with a local 
 - `src/foodrun/collect-splits.ts` — end-to-end demo orchestrator
 - `src/modules/sponge/` issues food-order virtual cards through the Sponge SDK.
 - `src/modules/supermemory.ts` stores and retrieves food preferences by phone number through the Supermemory SDK.
+- `src/modules/restaurant-availability.ts` shortlists open restaurants with Google Places/Yelp before Browser Use verifies online ordering.
 
 ## Installation
 

@@ -143,6 +143,86 @@ describe("processFoodrunJobs", () => {
     });
   });
 
+  test("verifies API-shortlisted open restaurants before cart build", async () => {
+    const { store, calls } = createStore({ jobs: [job()] });
+    const sent: unknown[] = [];
+    const browser: FoodrunBrowserUse & {
+      verifyRestaurantCandidates: NonNullable<import("../src/foodrun/job-worker").FoodrunAvailabilityBrowserUse["verifyRestaurantCandidates"]>;
+    } = {
+      searchRestaurants: async () => {
+        throw new Error("broad search should not run when API candidates exist");
+      },
+      verifyRestaurantCandidates: async (criteria, candidates, options) => {
+        expect(criteria.cuisine).toBe("Thai");
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0]?.name).toBe("Open Thai");
+        expect(options?.timeoutMs).toBe(210_000);
+
+        return {
+          sessionId: "browser_verify_123",
+          output: {
+            restaurants: [
+              {
+                name: "Open Thai",
+                orderingUrl: "https://toast.example.com/open-thai",
+                reason: "Verified open and accepting online pickup orders.",
+                dietaryFit: ["vegetarian options"],
+              },
+            ],
+          },
+          raw: {} as never,
+        };
+      },
+      buildCart: async () => {
+        throw new Error("buildCart should run in the cart_build job");
+      },
+    };
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await expect(
+      processFoodrunJobs(1, {
+        store,
+        browser,
+        notifier,
+        availabilityScanner: {
+          findCandidates: async () => [
+            {
+              name: "Open Thai",
+              orderingUrl: "https://toast.example.com/open-thai",
+              reason: "Open now per Google Places",
+              dietaryFit: [],
+            },
+          ],
+        },
+      }),
+    ).resolves.toMatchObject({ processed: 1 });
+    expect(calls[0]).toMatchObject({
+      method: "updateOrderSession",
+      input: {
+        roomId: "room_123",
+        state: "building_cart",
+        browserUseSessionId: "browser_verify_123",
+      },
+    });
+    expect(calls.find((call) => call.method === "appendEvent")?.input).toMatchObject({
+      eventType: "browser_use_restaurant_selected",
+      payload: {
+        candidates: [
+          {
+            name: "Open Thai",
+          },
+        ],
+      },
+    });
+    expect(sent[0]).toMatchObject({
+      body: "Status: building cart. I found Open Thai. I'm building a draft cart now.",
+    });
+  });
+
   test("notifies requester when restaurant availability search times out", async () => {
     const { store, calls } = createStore({ jobs: [job()] });
     const sent: unknown[] = [];

@@ -161,6 +161,27 @@ export class BrowserUseModule {
     };
   }
 
+  async verifyRestaurantCandidates(
+    criteria: OrderCriteria,
+    candidates: RestaurantOption[],
+    options?: BrowserUseRunOptions,
+  ): Promise<BrowserUseRunResult<RestaurantSearchOutput>> {
+    const result = await this.runTask(
+      buildRestaurantAvailabilityPrompt(criteria, candidates),
+      RestaurantSearchOutputSchema,
+      options,
+    );
+
+    return {
+      ...result,
+      output: normalizeRestaurantSearch(result.output),
+      raw: {
+        ...result.raw,
+        output: normalizeRestaurantSearch(result.output),
+      },
+    };
+  }
+
   async buildCart(
     criteria: OrderCriteria,
     restaurant: RestaurantOption,
@@ -266,6 +287,62 @@ Return JSON shaped like:
       "orderingUrl": "https://example.com/order",
       "address": "Street address",
       "reason": "Why this fits",
+      "estimatedPickupTime": "15-20 min",
+      "estimatedTotalUsd": 71.5,
+      "dietaryFit": ["vegetarian options"]
+    }
+  ]
+}
+`.trim();
+}
+
+export function buildRestaurantAvailabilityPrompt(
+  criteria: OrderCriteria,
+  candidates: RestaurantOption[],
+): string {
+  const location = criteria.location.placeName ?? criteria.location.raw;
+  const cuisine =
+    criteria.cuisine ?? (criteria.surpriseUs ? "surprise us" : "open");
+  const budget =
+    criteria.budgetPerPerson ?
+      `${formatMoney(criteria.budgetPerPerson)} per person`
+    : "not specified";
+
+  return `
+Verify restaurant availability for a group takeout order. Return structured JSON only.
+
+You are given API-shortlisted restaurant candidates. Browser-use should verify the candidates, not perform broad web search unless all candidates fail.
+
+Availability scan:
+- For each candidate, immediately check current hours/open status and whether online ordering is currently accepting pickup/delivery orders.
+- Prefer direct ordering pages, especially Toast, Square, ChowNow, BentoBox, Shopify, or official restaurant ordering pages.
+- Skip candidates that are closed, say "currently not accepting orders", have unavailable pickup/delivery, require login before cart, or have disabled add-to-cart controls.
+- Spend no more than about 30 seconds on a single candidate before moving on.
+- Return the first candidate that is currently open, accepting online orders, and likely cartable as the first restaurant.
+- If no ${cuisine} candidate is accepting orders, try one currently accepting nearby alternative cuisine and explain the substitution in "reason".
+- Do not place an order. Do not enter payment information.
+
+Search criteria:
+- Location: ${location}
+- Cuisine: ${cuisine}
+- Pickup/delivery: ${criteria.pickupOrDelivery}
+- Budget: ${budget}
+- Participant count: ${criteria.participantCount}
+- Preferences: ${formatList(criteria.preferences)}
+- Allergies: ${formatList(criteria.allergies)}
+
+Candidates:
+${candidates.map(formatCandidateForPrompt).join("\n")}
+
+Return JSON shaped like:
+{
+  "restaurants": [
+    {
+      "name": "Restaurant name",
+      "url": "https://example.com",
+      "orderingUrl": "https://example.com/order",
+      "address": "Street address",
+      "reason": "Open now and online ordering accepts pickup. Fits vegetarian/no peanuts.",
       "estimatedPickupTime": "15-20 min",
       "estimatedTotalUsd": 71.5,
       "dietaryFit": ["vegetarian options"]
@@ -436,6 +513,18 @@ function stripJsonFence(value: string): string {
 
 function formatList(values: string[]): string {
   return values.length > 0 ? values.join(", ") : "none";
+}
+
+function formatCandidateForPrompt(candidate: RestaurantOption, index: number): string {
+  return [
+    `${index + 1}. ${candidate.name}`,
+    candidate.address ? `   Address: ${candidate.address}` : undefined,
+    candidate.url ? `   URL: ${candidate.url}` : undefined,
+    candidate.orderingUrl ? `   Ordering URL: ${candidate.orderingUrl}` : undefined,
+    `   Reason/source notes: ${candidate.reason}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function formatMoney(money: Money): string {

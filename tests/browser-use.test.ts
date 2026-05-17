@@ -5,6 +5,7 @@ import type { MessageResponse, SessionResult } from "browser-use-sdk/v3";
 import {
   BrowserPromptOutputSchema,
   BrowserUseModule,
+  buildRestaurantAvailabilityPrompt,
   buildCartPrompt,
   buildRestaurantSearchPrompt,
   parseBrowserUseJson,
@@ -65,6 +66,24 @@ describe("Browser Use module", () => {
     expect(prompt).toContain('"status": "draft"');
     expect(prompt).toContain("Do not answer with prose");
     expect(prompt).toContain("Task stopped");
+  });
+
+  test("buildRestaurantAvailabilityPrompt verifies API-shortlisted candidates", () => {
+    const prompt = buildRestaurantAvailabilityPrompt(criteria, [
+      {
+        name: "Mission Thai",
+        orderingUrl: "https://toast.example.com/mission-thai",
+        address: "123 Mission St",
+        reason: "Open now per Google Places",
+        dietaryFit: [],
+      },
+    ]);
+
+    expect(prompt).toContain("API-shortlisted restaurant candidates");
+    expect(prompt).toContain("immediately check current hours/open status");
+    expect(prompt).toContain("Spend no more than about 30 seconds");
+    expect(prompt).toContain("Mission Thai");
+    expect(prompt).toContain("https://toast.example.com/mission-thai");
   });
 
   test("parseBrowserUseJson parses fenced JSON string into BrowserPromptOutputSchema", () => {
