@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/webhook/agentphone",
+      "destination": "/api/webhook/agentphone"
+    }
+  ]
+}

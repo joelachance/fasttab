@@ -1,0 +1,19 @@
+{
+  "name": "fasttab-agentphone",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:webhook": "node --env-file=.env.local --import tsx src/server.ts",
+    "setup:agentphone": "node --env-file=.env.local --import tsx src/provision.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "agentphone": "1.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "25.8.0",
+    "tsx": "4.22.1",
+    "typescript": "6.0.3"
+  }
+}
