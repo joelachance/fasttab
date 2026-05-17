@@ -155,7 +155,10 @@ describe("processFoodrunJobs", () => {
       searchRestaurants: async () => {
         throw new Error("searchRestaurants should not run in the cart_build job");
       },
-      buildCart: async () => ({
+      buildCart: async (_criteria, _restaurant, options) => {
+        expect(options?.sessionId).toBe("browser_search_123");
+
+        return {
         sessionId: "browser_cart_123",
         liveUrl: "https://browser.example.com/live",
         output: {
@@ -167,7 +170,8 @@ describe("processFoodrunJobs", () => {
           blockers: [],
         },
         raw: {} as never,
-      }),
+        };
+      },
     };
     const notifier: FoodrunJobNotifier = {
       sendText: async (input) => {
@@ -190,6 +194,82 @@ describe("processFoodrunJobs", () => {
       agentId: "agent_123",
       toNumber: "+15551234567",
       numberId: "num_123",
+    });
+  });
+
+  test("edits a cart from stored cart context and Browser Use session", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "editing_cart",
+      selectedRestaurant: {
+        name: "Mission Thai",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: ["vegetarian"],
+      },
+      browserUseSessionId: "browser_cart_123",
+      cart: {
+        restaurantName: "Mission Thai",
+        items: [
+          {
+            name: "Pad Thai",
+            quantity: 2,
+            price: { currency: "usd", cents: 1600 },
+            notes: "no peanuts",
+          },
+        ],
+        estimatedTotal: { currency: "usd", cents: 4200 },
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "cart_edit", payload: { ...job().payload, editText: "swap one Pad Thai for green curry" } })],
+      session,
+    });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run in the cart_edit job");
+      },
+      buildCart: async (criteria, _restaurant, options) => {
+        expect(options?.sessionId).toBe("browser_cart_123");
+        expect(criteria.preferences).toContain(
+          "Current cart before changes: Mission Thai, items: 2x Pad Thai $16.00 (no peanuts), total: $42.00",
+        );
+        expect(criteria.preferences).toContain(
+          "Cart change requested by text: swap one Pad Thai for green curry",
+        );
+
+        return {
+          sessionId: "browser_cart_456",
+          output: {
+            restaurantName: "Mission Thai",
+            items: [
+              { name: "Pad Thai", quantity: 1 },
+              { name: "Green Curry", quantity: 1 },
+            ],
+            estimatedTotal: { currency: "usd", cents: 4300 },
+            screenshots: [],
+            status: "checkout_ready",
+            blockers: [],
+          },
+          raw: {} as never,
+        };
+      },
+    };
+
+    await processFoodrunJobs(1, { store, browser, notifier: null });
+
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      state: "confirming_cart",
+      browserUseSessionId: "browser_cart_456",
+      cart: {
+        items: [
+          { name: "Pad Thai", quantity: 1 },
+          { name: "Green Curry", quantity: 1 },
+        ],
+      },
     });
   });
 

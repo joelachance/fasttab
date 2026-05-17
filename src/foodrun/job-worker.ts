@@ -385,6 +385,9 @@ function buildOrderCriteria(
   ];
 
   if (editText) {
+    if (session.cart) {
+      preferences.push(`Current cart before changes: ${formatCartForPrompt(session.cart)}`);
+    }
     preferences.push(`Cart change requested by text: ${editText}`);
   }
 
@@ -420,6 +423,26 @@ function browserOptions(env: Env = process.env) {
 
 function cartTotalCents(cart: CartSummary | undefined): number | undefined {
   return cart?.estimatedTotal?.cents ?? cart?.subtotal?.cents;
+}
+
+function formatCartForPrompt(cart: CartSummary): string {
+  const items = cart.items
+    .map((item) => {
+      const price = item.price ? ` $${(item.price.cents / 100).toFixed(2)}` : "";
+      const notes = item.notes ? ` (${item.notes})` : "";
+
+      return `${item.quantity}x ${item.name}${price}${notes}`;
+    })
+    .join("; ");
+  const total = cartTotalCents(cart);
+
+  return [
+    cart.restaurantName,
+    items ? `items: ${items}` : undefined,
+    total ? `total: $${(total / 100).toFixed(2)}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): string {
