@@ -604,12 +604,12 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
     statusLine,
     cart.status === "blocked" ?
       `I could not build a checkout-ready cart at ${restaurant.name}.${totalLine}`
-    : `I built a FastTab draft cart at ${restaurant.name}.${totalLine}`,
+    : `I checked ${restaurant.name} and built this FastTab option.${totalLine}`,
     items ? `Items: ${items}` : "",
     cart.blockers.length ? `Blocked by: ${cart.blockers.join(", ")}` : "",
     cart.status === "blocked" ?
       "Reply 'retry cart' to try again, or send a different restaurant or preference."
-    : "Reply with changes, or reply 'confirm order' to continue.",
+    : "Reply 'confirm order' to approve this option, 'no' to try another restaurant, or send changes.",
   ]
     .filter(Boolean)
     .join("\n");

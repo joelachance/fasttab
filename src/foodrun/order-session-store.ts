@@ -65,13 +65,13 @@ export type UpdateOrderSessionInput = {
   state?: FoodrunOrderState;
   confirmedPreferences?: ConfirmedPreferences;
   supermemoryContext?: unknown[];
-  selectedRestaurant?: unknown;
-  cart?: unknown;
-  spongeCard?: unknown;
-  orderConfirmation?: unknown;
+  selectedRestaurant?: unknown | null;
+  cart?: unknown | null;
+  spongeCard?: unknown | null;
+  orderConfirmation?: unknown | null;
   stripePaymentLinks?: unknown[];
-  browserUseSessionId?: string;
-  browserUseLiveUrl?: string;
+  browserUseSessionId?: string | null;
+  browserUseLiveUrl?: string | null;
 };
 
 export class OrderSessionStore {
@@ -126,15 +126,15 @@ export class OrderSessionStore {
       `
         UPDATE foodrun_order_sessions SET
           state = COALESCE($2, state),
-          confirmed_preferences = COALESCE($3::jsonb, confirmed_preferences),
-          supermemory_context = COALESCE($4::jsonb, supermemory_context),
-          selected_restaurant = COALESCE($5::jsonb, selected_restaurant),
-          cart = COALESCE($6::jsonb, cart),
-          sponge_card = COALESCE($7::jsonb, sponge_card),
-          order_confirmation = COALESCE($8::jsonb, order_confirmation),
-          stripe_payment_links = COALESCE($9::jsonb, stripe_payment_links),
-          browser_use_session_id = COALESCE($10, browser_use_session_id),
-          browser_use_live_url = COALESCE($11, browser_use_live_url)
+          confirmed_preferences = CASE WHEN $12 THEN $3::jsonb ELSE confirmed_preferences END,
+          supermemory_context = CASE WHEN $13 THEN $4::jsonb ELSE supermemory_context END,
+          selected_restaurant = CASE WHEN $14 THEN $5::jsonb ELSE selected_restaurant END,
+          cart = CASE WHEN $15 THEN $6::jsonb ELSE cart END,
+          sponge_card = CASE WHEN $16 THEN $7::jsonb ELSE sponge_card END,
+          order_confirmation = CASE WHEN $17 THEN $8::jsonb ELSE order_confirmation END,
+          stripe_payment_links = CASE WHEN $18 THEN $9::jsonb ELSE stripe_payment_links END,
+          browser_use_session_id = CASE WHEN $19 THEN $10 ELSE browser_use_session_id END,
+          browser_use_live_url = CASE WHEN $20 THEN $11 ELSE browser_use_live_url END
         WHERE room_id = $1
         RETURNING *
       `,
@@ -150,6 +150,15 @@ export class OrderSessionStore {
         optionalJson(input.stripePaymentLinks),
         input.browserUseSessionId ?? null,
         input.browserUseLiveUrl ?? null,
+        hasOwn(input, "confirmedPreferences"),
+        hasOwn(input, "supermemoryContext"),
+        hasOwn(input, "selectedRestaurant"),
+        hasOwn(input, "cart"),
+        hasOwn(input, "spongeCard"),
+        hasOwn(input, "orderConfirmation"),
+        hasOwn(input, "stripePaymentLinks"),
+        hasOwn(input, "browserUseSessionId"),
+        hasOwn(input, "browserUseLiveUrl"),
       ],
     )) as OrderSessionRow[];
 
@@ -415,6 +424,10 @@ function mapJob(row?: JobRow): FoodrunJob {
 
 function optionalJson(value: unknown): string | null {
   return value === undefined ? null : JSON.stringify(value);
+}
+
+function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function jsonValue<T>(value: unknown, fallback?: T): T {

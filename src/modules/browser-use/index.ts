@@ -363,13 +363,13 @@ Build a takeout cart for the group and stop before payment. Return raw JSON only
 
 Safety rails:
 - Do not place the order. Do not enter payment information.
-- Prefer a real website cart when possible, but an internal draft cart is acceptable.
-- Before choosing items, immediately check whether online ordering is currently available. If the page says "currently not accepting orders", is closed, has unavailable pickup/delivery, or disables add-to-cart, do not build a draft there yet.
-- Prefer Toast ordering pages first. If the provided URL is DoorDash, Uber Eats, Grubhub, or cannot build a guest cart, search for the same restaurant on Toast, Square, ChowNow, BentoBox, Shopify, or the official restaurant site.
-- If that restaurant cannot support a guest cart or is not currently accepting online orders, try a comparable nearby restaurant that matches the order context and uses Toast or another direct ordering provider.
-- Only return a draft cart for a closed/unavailable restaurant after trying comparable nearby direct-ordering restaurants.
-- If checkout requires login, payment, unavailable items, or another site blocker, still build a draft cart from visible menu items before reporting the blocker.
-- Use "status": "draft" when you found plausible menu items but could not make a checkout-ready website cart.
+- Try only the restaurant listed below. Do not search for or switch to a comparable nearby restaurant.
+- Immediately check whether this restaurant is open and online ordering is currently accepting ${criteria.pickupOrDelivery} orders.
+- Confirm that at least one item can be added to a cart as a guest before using "status": "checkout_ready".
+- Spend at most about 60 seconds trying this restaurant's ordering URL. If it is closed, not accepting orders, requires login before cart, or has disabled add-to-cart controls, return JSON with "status": "blocked" and clear blockers.
+- Prefer a real website cart when possible, but an internal draft cart from visible menu items is acceptable if the site blocks checkout after you verify menu/cartability.
+- If checkout requires login, payment, unavailable items, or another site blocker after items are visible, still build a draft cart from visible menu items before reporting the blocker.
+- Use "status": "draft" when you found plausible menu items at this restaurant but could not make a checkout-ready website cart.
 - Use "status": "blocked" only when you cannot find enough menu information to choose items.
 - If you cannot complete the website cart for any reason, still return the JSON object with any items you found and blockers explaining what happened.
 - Do not answer with prose, markdown, comments, or a "Task stopped" sentence.

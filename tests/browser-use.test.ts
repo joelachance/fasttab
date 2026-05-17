@@ -57,12 +57,12 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("stop before payment");
     expect(prompt).toContain("https://example.com/order");
     expect(prompt).toContain("Return raw JSON only");
-    expect(prompt).toContain("Prefer Toast ordering pages first");
-    expect(prompt).toContain("Before choosing items");
-    expect(prompt).toContain("Only return a draft cart for a closed/unavailable restaurant");
-    expect(prompt).toContain("try a comparable nearby restaurant");
+    expect(prompt).toContain("Try only the restaurant listed below");
+    expect(prompt).toContain("Immediately check whether this restaurant is open");
+    expect(prompt).toContain("at least one item can be added to a cart");
+    expect(prompt).toContain("Spend at most about 60 seconds");
     expect(prompt).toContain('"status": "blocked"');
-    expect(prompt).toContain("internal draft cart is acceptable");
+    expect(prompt).toContain("internal draft cart from visible menu items is acceptable");
     expect(prompt).toContain('"status": "draft"');
     expect(prompt).toContain("Do not answer with prose");
     expect(prompt).toContain("Task stopped");

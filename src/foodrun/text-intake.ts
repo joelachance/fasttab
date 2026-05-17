@@ -98,6 +98,29 @@ export async function handleFoodrunTextMessage(
     };
   }
 
+  if (session.state === "confirming_cart" && isRestaurantRejection(input.body)) {
+    await store.updateOrderSession(input.roomId, {
+      state: "searching_restaurants",
+      confirmedPreferences: preferencesWithRejectedRestaurant(session.confirmedPreferences, session),
+      selectedRestaurant: null,
+      cart: null,
+      browserUseSessionId: null,
+      browserUseLiveUrl: null,
+    });
+    await store.enqueueJob({
+      roomId: input.roomId,
+      kind: "restaurant_search",
+      payload: jobPayload(input),
+    });
+
+    return {
+      reply:
+        "Status: trying another option. I'll check the next restaurant is open and can add to cart, then send it for approval.",
+      state: "searching_restaurants",
+      extracted,
+    };
+  }
+
   if (isCartEdit(input.body, session.state)) {
     await store.updateOrderSession(input.roomId, { state: "editing_cart" });
     await store.enqueueJob({
@@ -306,6 +329,30 @@ function isRetryCart(text: string): boolean {
   return /\b(retry|try again|rebuild|build)\b.*\bcart\b|\bcart\b.*\b(retry|again|rebuild)\b/i.test(
     text.trim(),
   );
+}
+
+function isRestaurantRejection(text: string): boolean {
+  return /^(no|nope|nah|try another|different restaurant|another option|not this one)$/i.test(
+    text.trim(),
+  );
+}
+
+function preferencesWithRejectedRestaurant(
+  preferences: ConfirmedPreferences,
+  session: { selectedRestaurant?: { name?: string } },
+): ConfirmedPreferences {
+  const name = session.selectedRestaurant?.name;
+
+  if (!name) {
+    return preferences;
+  }
+
+  const rejectionNote = `Previous option rejected: ${name}. Try a different restaurant.`;
+
+  return {
+    ...preferences,
+    notes: [...(preferences.notes ?? []).filter((note) => note !== rejectionNote), rejectionNote],
+  };
 }
 
 function canRetryCart(session: { selectedRestaurant?: unknown; cart?: unknown }, text: string): boolean {

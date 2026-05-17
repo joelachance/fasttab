@@ -124,7 +124,12 @@ describe("processFoodrunJobs", () => {
     };
 
     await expect(
-      processFoodrunJobs(1, { store, browser, notifier }),
+      processFoodrunJobs(1, {
+        store,
+        browser,
+        availabilityScanner: { findCandidates: async () => [] },
+        notifier,
+      }),
     ).resolves.toMatchObject({ processed: 1 });
     expect(calls[0]).toMatchObject({
       method: "updateOrderSession",
@@ -375,10 +380,10 @@ describe("processFoodrunJobs", () => {
     expect(sent[0]).toMatchObject({
       body: [
         "Status: draft cart ready.",
-        "I built a FastTab draft cart at Mission Thai. Estimated total: $20.00.",
+        "I checked Mission Thai and built this FastTab option. Estimated total: $20.00.",
         "Items: 1x Green curry with tofu",
         'Blocked by: Browser Use could not create a checkout-ready website cart, so FastTab built an internal draft cart., Unexpected token "T", "Task stopp"... is not valid JSON',
-        "Reply with changes, or reply 'confirm order' to continue.",
+        "Reply 'confirm order' to approve this option, 'no' to try another restaurant, or send changes.",
       ].join("\n"),
     });
   });
@@ -463,10 +468,10 @@ describe("processFoodrunJobs", () => {
     expect(sent[0]).toMatchObject({
       body: [
         "Status: draft cart ready.",
-        "I built a FastTab draft cart at Mission Thai. Estimated total: $20.00.",
+        "I checked Mission Thai and built this FastTab option. Estimated total: $20.00.",
         "Items: 1x Green curry with tofu",
         "Blocked by: Browser Use could not create a checkout-ready website cart, so FastTab built an internal draft cart., Task stopped before checkout",
-        "Reply with changes, or reply 'confirm order' to continue.",
+        "Reply 'confirm order' to approve this option, 'no' to try another restaurant, or send changes.",
       ].join("\n"),
     });
   });

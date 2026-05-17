@@ -225,6 +225,65 @@ describe("text intake", () => {
     ]);
   });
 
+  test("rejected cart option clears the restaurant and starts another search", async () => {
+    const { store, calls } = createFakeStore("confirming_cart", {
+      confirmedPreferences: {
+        cuisines: ["Thai"],
+        notes: ["vegetarian"],
+      },
+      selectedRestaurant: {
+        name: "Thai Basil Cart",
+      },
+      cart: {
+        restaurantName: "Thai Basil Cart",
+        items: [{ name: "Pad Thai", quantity: 1 }],
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    });
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "no",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result).toMatchObject({
+      state: "searching_restaurants",
+      reply:
+        "Status: trying another option. I'll check the next restaurant is open and can add to cart, then send it for approval.",
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "createOrderSession",
+      "upsertParticipant",
+      "appendEvent",
+      "updateOrderSession",
+      "enqueueJob",
+    ]);
+    expect(calls[3]?.input).toMatchObject({
+      roomId: "conv_123",
+      state: "searching_restaurants",
+      selectedRestaurant: null,
+      cart: null,
+      browserUseSessionId: null,
+      browserUseLiveUrl: null,
+      confirmedPreferences: {
+        cuisines: ["Thai"],
+        notes: ["vegetarian", "Previous option rejected: Thai Basil Cart. Try a different restaurant."],
+      },
+    });
+    expect(calls[4]?.input).toMatchObject({
+      roomId: "conv_123",
+      kind: "restaurant_search",
+    });
+  });
+
   test("retries cart building from the selected restaurant state", async () => {
     const { store, calls } = createFakeStore("selecting_restaurant", {
       selectedRestaurant: {
