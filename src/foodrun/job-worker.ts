@@ -110,7 +110,11 @@ export async function processFoodrunJobs(
   let processed = 0;
 
   if ("requeueStaleRunningJobs" in store) {
-    await store.requeueStaleRunningJobs(FOODRUN_STALE_JOB_SECONDS);
+    const requeuedJobs = await store.requeueStaleRunningJobs(FOODRUN_STALE_JOB_SECONDS);
+
+    for (const requeuedJob of requeuedJobs) {
+      await notifyStaleJobRequeued(requeuedJob, { ...options, store });
+    }
   }
 
   while (processed < limit) {
@@ -655,6 +659,31 @@ function formatRestaurantFoundText(restaurant: RestaurantOption): string {
 
 function formatPaymentLinkText(amountCents: number, url: string): string {
   return `Status: split ready. FastTab split: your share is $${(amountCents / 100).toFixed(2)}.\nPay here: ${url}`;
+}
+
+async function notifyStaleJobRequeued(
+  job: FoodrunJob,
+  options: ProcessFoodrunJobsOptions & { store: FoodrunJobStore },
+): Promise<void> {
+  if (job.kind !== "cart_build" && job.kind !== "cart_edit") {
+    return;
+  }
+
+  const session = await options.store.getOrderSession(job.roomId);
+  const restaurantName = session?.selectedRestaurant?.name ?? "your restaurant";
+
+  try {
+    await notify(
+      job,
+      options,
+      [
+        "Status: still building cart.",
+        `${restaurantName} is taking longer than expected — I'm retrying now and will text when the draft cart is ready.`,
+      ].join("\n"),
+    );
+  } catch (error) {
+    console.error("Foodrun stale job requeue notification failed", error);
+  }
 }
 
 async function notify(

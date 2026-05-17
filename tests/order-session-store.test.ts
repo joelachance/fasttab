@@ -190,10 +190,31 @@ describe("OrderSessionStore", () => {
   });
 
   test("requeues stale running jobs", async () => {
-    const { sql, calls } = createFakeSql([[{ job_id: "job_stale" }]]);
+    const { sql, calls } = createFakeSql([
+      [
+        {
+          job_id: "job_stale",
+          room_id: "room_123",
+          kind: "cart_build",
+          status: "queued",
+          attempts: 2,
+          run_after: new Date("2026-05-17T23:00:00.000Z"),
+          locked_at: null,
+          last_error: "Requeued after worker stopped responding",
+          payload: {},
+        },
+      ],
+    ]);
     const store = new OrderSessionStore(sql);
 
-    await expect(store.requeueStaleRunningJobs(120)).resolves.toBe(1);
+    await expect(store.requeueStaleRunningJobs(120)).resolves.toEqual([
+      expect.objectContaining({
+        jobId: "job_stale",
+        roomId: "room_123",
+        kind: "cart_build",
+        status: "queued",
+      }),
+    ]);
 
     expect(calls[0]?.query).toContain("status = 'queued'");
     expect(calls[0]?.query).toContain("locked_at < now()");
