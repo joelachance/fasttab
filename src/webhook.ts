@@ -64,7 +64,7 @@ class AgentPhoneSdkTextSender implements AgentPhoneTextSender {
   constructor(private readonly env: Env = process.env) {
     this.client = new AgentPhoneClient({
       token: requiredEnv(env, "AGENTPHONE_API_KEY"),
-      baseUrl: envWithDefault(env, "AGENTPHONE_API_BASE", "https://api.agentphone.ai/v1"),
+      baseUrl: agentPhoneApiBase(env),
     });
   }
 
@@ -190,6 +190,13 @@ function stringField(record: Record<string, unknown>, ...names: string[]): strin
   }
 
   return undefined;
+}
+
+function agentPhoneApiBase(env: Env): string {
+  return envWithDefault(env, "AGENTPHONE_API_BASE", "https://api.agentphone.ai").replace(
+    /\/v1\/?$/,
+    "",
+  );
 }
 
 function timingSafeEqual(a: string, b: string): boolean {

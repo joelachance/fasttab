@@ -34,7 +34,10 @@ class AgentPhoneModule {
   constructor(private readonly env: Env = process.env) {
     this.client = new AgentPhoneClient({
       token: requiredEnv(env, "AGENTPHONE_API_KEY"),
-      baseUrl: envWithDefault(env, "AGENTPHONE_API_BASE", "https://api.agentphone.ai/v1"),
+      baseUrl: envWithDefault(env, "AGENTPHONE_API_BASE", "https://api.agentphone.ai").replace(
+        /\/v1\/?$/,
+        "",
+      ),
     });
   }
 
