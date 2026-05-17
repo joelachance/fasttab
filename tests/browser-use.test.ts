@@ -8,6 +8,7 @@ import {
   buildCartPrompt,
   buildRestaurantSearchPrompt,
   parseBrowserUseJson,
+  runCartTaskWithBlockedFallback,
 } from "../src/modules/browser-use";
 import type { OrderCriteria, RestaurantOption } from "../src/types";
 
@@ -134,5 +135,27 @@ describe("Browser Use module", () => {
     });
 
     expect(messages).toEqual(["Clicked checkout"]);
+  });
+
+  test("runCartTaskWithBlockedFallback converts stopped prose into blocked cart JSON", async () => {
+    const browser = {
+      runTask: async () => {
+        throw new SyntaxError('Unexpected token "T", "Task stopp"... is not valid JSON');
+      },
+    };
+
+    const result = await runCartTaskWithBlockedFallback(browser, criteria, restaurant, {
+      sessionId: "browser_cart_123",
+    });
+
+    expect(result).toMatchObject({
+      sessionId: "browser_cart_123",
+      output: {
+        restaurantName: "Basil Cafe Thai Cuisine",
+        items: [],
+        status: "blocked",
+        blockers: ['Unexpected token "T", "Task stopp"... is not valid JSON'],
+      },
+    });
   });
 });

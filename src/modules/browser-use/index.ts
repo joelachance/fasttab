@@ -166,9 +166,10 @@ export class BrowserUseModule {
     restaurant: RestaurantOption,
     options?: BrowserUseRunOptions,
   ): Promise<BrowserUseRunResult<CartBuildOutput>> {
-    const result = await this.runTask(
-      buildCartPrompt(criteria, restaurant),
-      CartBuildOutputSchema,
+    const result = await runCartTaskWithBlockedFallback(
+      this,
+      criteria,
+      restaurant,
       options,
     );
 
@@ -179,6 +180,38 @@ export class BrowserUseModule {
         ...result.raw,
         output: normalizeCart(result.output),
       },
+    };
+  }
+}
+
+export async function runCartTaskWithBlockedFallback(
+  browser: Pick<BrowserUseModule, "runTask">,
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  options?: BrowserUseRunOptions,
+): Promise<BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>>> {
+  try {
+    return await browser.runTask(buildCartPrompt(criteria, restaurant), CartBuildOutputSchema, options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (!looksLikeStoppedTask(message)) {
+      throw error;
+    }
+
+    return {
+      sessionId: options?.sessionId ?? "browser_use_blocked",
+      output: {
+        restaurantName: restaurant.name,
+        items: [],
+        screenshots: [],
+        status: "blocked",
+        blockers: [message],
+      },
+      raw: {
+        id: options?.sessionId ?? "browser_use_blocked",
+        output: message,
+      } as unknown as SessionResult<z.output<typeof CartBuildOutputSchema>>,
     };
   }
 }
@@ -293,6 +326,10 @@ export function parseBrowserUseJson<T extends z.ZodType>(
   }
 
   return schema.parse(parsed);
+}
+
+function looksLikeStoppedTask(message: string): boolean {
+  return /Task stopp|not valid JSON/i.test(message);
 }
 
 function normalizeRestaurantSearch(
