@@ -234,6 +234,13 @@ Safety rails:
 - Do not place an order. Do not log in. Do not enter payment information.
 - Stop before checkout if ordering requires login, payment, or order placement.
 
+Cartability requirements:
+- Prefer restaurants with direct online ordering that lets a guest add items and view a cart before login or payment.
+- Prefer Toast first, then Square, ChowNow, BentoBox, Shopify, or an official restaurant ordering page.
+- Avoid DoorDash, Uber Eats, Grubhub, and other marketplaces unless no direct ordering option exists.
+- If a restaurant looks good but its cart cannot be built as a guest, skip it and try another restaurant.
+- Return the most cartable option first because the next step will build a sample cart from the first result.
+
 Search criteria:
 - Location: ${location}
 - Cuisine: ${cuisine}
@@ -274,6 +281,8 @@ Build a takeout cart for the group and stop before payment. Return raw JSON only
 Safety rails:
 - Do not place the order. Do not enter payment information.
 - Prefer a real website cart when possible, but an internal draft cart is acceptable.
+- Prefer Toast ordering pages first. If the provided URL is DoorDash, Uber Eats, Grubhub, or cannot build a guest cart, search for the same restaurant on Toast, Square, ChowNow, BentoBox, Shopify, or the official restaurant site.
+- If that restaurant cannot support a guest cart, try a comparable nearby restaurant that matches the order context and uses Toast or another direct ordering provider.
 - If checkout requires login, payment, unavailable items, or another site blocker, still build a draft cart from visible menu items before reporting the blocker.
 - Use "status": "draft" when you found plausible menu items but could not make a checkout-ready website cart.
 - Use "status": "blocked" only when you cannot find enough menu information to choose items.
