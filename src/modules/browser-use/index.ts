@@ -216,6 +216,10 @@ export type BuildCartPromptOptions = {
   marketplaceProvider?: MarketplaceProvider;
 };
 
+export const OFFICIAL_DIRECT_CART_TIMEOUT_MS = 210_000;
+export const MARKETPLACE_FALLBACK_TIMEOUT_MS = 150_000;
+export const MARKETPLACE_PARALLEL_TIMEOUT_MS = 120_000;
+
 export async function buildCartWithOrderingProviders(
   browser: Pick<BrowserUseModule, "runTask">,
   criteria: OrderCriteria,
@@ -228,6 +232,10 @@ export async function buildCartWithOrderingProviders(
 
   if (prefersMarketplaceOrdering(criteria, restaurant)) {
     return buildMarketplaceCartInParallel(browser, criteria, restaurant, options);
+  }
+
+  if (hasOfficialDirectOrdering(restaurant)) {
+    return buildOfficialDirectCartWithFallback(browser, criteria, restaurant, options);
   }
 
   for (const orderingUrl of urlAttempts) {
@@ -302,7 +310,65 @@ export async function buildCartWithOrderingProviders(
   );
 }
 
-const MARKETPLACE_PARALLEL_TIMEOUT_MS = 90_000;
+export async function buildOfficialDirectCartWithFallback(
+  browser: Pick<BrowserUseModule, "runTask">,
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  options?: BrowserUseRunOptions,
+): Promise<BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>>> {
+  const officialTimeoutMs = options?.timeoutMs ?? OFFICIAL_DIRECT_CART_TIMEOUT_MS;
+  const blockers: string[] = [];
+  let lastResult: BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>> | undefined;
+
+  for (const orderingUrl of buildOrderingUrlAttempts(restaurant)) {
+    const result = await runCartTaskWithBlockedFallback(
+      browser,
+      criteria,
+      restaurant,
+      { ...options, timeoutMs: officialTimeoutMs },
+      { orderingUrl, discoverProviders: false },
+    );
+    lastResult = result;
+
+    if (isUsefulCartResult(result.output)) {
+      return result;
+    }
+
+    blockers.push(...result.output.blockers);
+  }
+
+  const marketplace = await runCartTaskWithBlockedFallback(
+    browser,
+    criteria,
+    restaurant,
+    { ...options, timeoutMs: MARKETPLACE_FALLBACK_TIMEOUT_MS },
+    { useMarketplace: true, marketplaceProvider: "grubhub" },
+  );
+  lastResult = marketplace;
+
+  if (isUsefulCartResult(marketplace.output)) {
+    return marketplace;
+  }
+
+  blockers.push(...marketplace.output.blockers);
+
+  return (
+    lastResult ?? {
+      sessionId: options?.sessionId ?? "browser_use_blocked",
+      output: {
+        restaurantName: restaurant.name,
+        items: [],
+        screenshots: [],
+        status: "blocked",
+        blockers: uniqueStrings(blockers),
+      },
+      raw: {
+        id: options?.sessionId ?? "browser_use_blocked",
+        output: uniqueStrings(blockers).join("; "),
+      } as unknown as SessionResult<z.output<typeof CartBuildOutputSchema>>,
+    }
+  );
+}
 
 export async function buildMarketplaceCartInParallel(
   browser: Pick<BrowserUseModule, "runTask">,
@@ -310,7 +376,10 @@ export async function buildMarketplaceCartInParallel(
   restaurant: RestaurantOption,
   options?: BrowserUseRunOptions,
 ): Promise<BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>>> {
-  const timeoutMs = options?.timeoutMs ?? MARKETPLACE_PARALLEL_TIMEOUT_MS;
+  const timeoutMs = Math.min(
+    options?.timeoutMs ?? MARKETPLACE_PARALLEL_TIMEOUT_MS,
+    MARKETPLACE_PARALLEL_TIMEOUT_MS,
+  );
   const providers: MarketplaceProvider[] = ["grubhub", "doordash"];
   const attempts = await Promise.all(
     providers.map((marketplaceProvider) =>
@@ -596,9 +665,11 @@ Ordering provider strategy:
 Ordering provider strategy:
 - Stay on ${restaurant.name}. Do not switch to a different restaurant.
 - Start at the official Insomnia Cookies ordering URL below. Enter the delivery address and store if prompted.
+- Within 60 seconds: if checkout is blocked by reCAPTCHA, login, or payment, return JSON with "status": "draft" using visible menu prices. Do NOT spend the full session timeout searching or solving captchas.
+- Add at least 2-3 real cookie items from the visible menu (e.g. Classic Chocolate Chunk, Deluxe Chocolate Chunk, Snickerdoodle) with priceUsd from the page when visible.
+- Skip login forms, account creation, and reCAPTCHA loops — note them in blockers and return draft cart JSON immediately.
+- Do not open Grubhub, DoorDash, or other sites in this attempt.
 - Build a guest-visible cart when possible; otherwise return a draft cart from visible menu items.
-- If the official site blocks guest cart building, try Grubhub and DoorDash for this same restaurant.
-- Spend up to about 90 seconds on the official site before falling back to marketplaces.
 `
     : `
 Ordering provider strategy:

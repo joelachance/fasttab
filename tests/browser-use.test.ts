@@ -7,6 +7,7 @@ import {
   BrowserUseModule,
   buildCartWithOrderingProviders,
   buildMarketplaceCartInParallel,
+  buildOfficialDirectCartWithFallback,
   buildRestaurantAvailabilityPrompt,
   buildCartPrompt,
   buildRestaurantSearchPrompt,
@@ -196,6 +197,23 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("Prefer Grubhub first");
   });
 
+  test("buildCartPrompt official insomnia site returns draft within 60s and skips captcha", () => {
+    const prompt = buildCartPrompt(
+      { ...criteria, preferences: ["Insomnia Cookies"] },
+      {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "Cookie delivery",
+        dietaryFit: [],
+      },
+    );
+
+    expect(prompt).toContain("Within 60 seconds");
+    expect(prompt).toContain("Classic Chocolate Chunk");
+    expect(prompt).toContain("reCAPTCHA");
+    expect(prompt).toContain("Do not open Grubhub");
+  });
+
   test("buildCartPrompt marketplace grubhub mode scopes to grubhub only", () => {
     const prompt = buildCartPrompt(
       criteria,
@@ -247,7 +265,7 @@ describe("Browser Use module", () => {
         reason: "Cookie delivery",
         dietaryFit: [],
       },
-      { timeoutMs: 90_000 },
+      { timeoutMs: 120_000 },
     );
 
     expect(calls).toHaveLength(2);
@@ -257,7 +275,7 @@ describe("Browser Use module", () => {
     expect(result.output.items).toHaveLength(1);
   });
 
-  test("buildCartWithOrderingProviders tries official insomnia site before marketplace", async () => {
+  test("buildCartWithOrderingProviders tries official insomnia site then grubhub only", async () => {
     const calls: string[] = [];
     const browser = {
       runTask: async (task: string) => {
@@ -291,9 +309,48 @@ describe("Browser Use module", () => {
       },
     );
 
-    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls).toHaveLength(2);
     expect(calls[0]).toContain("insomniacookies.com");
+    expect(calls[1]).toContain("grubhub.com only");
+    expect(calls[1]).not.toContain("doordash.com only");
     expect(result.output.items).toHaveLength(1);
+  });
+
+  test("buildOfficialDirectCartWithFallback does not run provider discovery", async () => {
+    const calls: string[] = [];
+    const browser = {
+      runTask: async (task: string) => {
+        calls.push(task);
+
+        return {
+          sessionId: `session_${calls.length}`,
+          output: {
+            restaurantName: "Insomnia Cookies",
+            items: [],
+            screenshots: [],
+            status: "blocked",
+            blockers: ["blocked"],
+          },
+          raw: { id: `session_${calls.length}`, output: "" },
+        };
+      },
+    };
+
+    await buildOfficialDirectCartWithFallback(
+      browser,
+      { ...criteria, preferences: ["Insomnia Cookies"] },
+      {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "Cookie delivery",
+        dietaryFit: [],
+      },
+    );
+
+    expect(calls).toHaveLength(2);
+    expect(calls.every((task) => !task.includes("Search the web for this restaurant's direct ordering page"))).toBe(
+      true,
+    );
   });
 
   test("buildCartWithOrderingProviders retries discovery after blocked provider", async () => {

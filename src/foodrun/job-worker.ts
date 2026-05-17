@@ -105,6 +105,7 @@ class AgentPhoneJobNotifier implements FoodrunJobNotifier {
   }
 }
 
+// Default limit=1 keeps each Vercel cron invocation within maxDuration when cart builds use long Browser Use timeouts.
 export async function processFoodrunJobs(
   limit = 1,
   options: ProcessFoodrunJobsOptions = {},
@@ -507,13 +508,21 @@ function buildOrderCriteria(
   };
 }
 
-function browserOptions(env: Env = process.env, restaurant?: RestaurantOption) {
-  const criteriaHint = restaurant?.name ?? "";
+function cartBuildTimeoutMs(env: Env = process.env, restaurant?: RestaurantOption): number {
+  const defaultMs = Number(envWithDefault(env, "BROWSER_USE_CART_TIMEOUT_MS", "240000"));
 
+  if (restaurant && hasOfficialDirectOrdering(restaurant)) {
+    return 210_000;
+  }
+
+  return defaultMs;
+}
+
+function browserOptions(env: Env = process.env, restaurant?: RestaurantOption) {
   return {
     keepAlive: true,
     maxCostUsd: Number(env.BROWSER_USE_MAX_COST_USD ?? 2),
-    timeoutMs: /insomnia|crumbl cookies?/i.test(criteriaHint) ? 95_000 : 240_000,
+    timeoutMs: cartBuildTimeoutMs(env, restaurant),
   };
 }
 
@@ -615,6 +624,9 @@ function fallbackItemNames(criteria: OrderCriteria, restaurant: RestaurantOption
   }
   if (text.includes("sushi") || text.includes("japanese")) {
     return ["Avocado roll", "Vegetable udon", "Edamame"];
+  }
+  if (text.includes("insomnia") || text.includes("cookie")) {
+    return ["Classic Chocolate Chunk", "Deluxe Chocolate Chunk", "Snickerdoodle"];
   }
 
   return ["Vegetarian entree", "Vegetable side", "Group appetizer"];

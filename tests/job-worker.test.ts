@@ -322,6 +322,92 @@ describe("processFoodrunJobs", () => {
     });
   });
 
+  test("uses a longer browser timeout for insomnia cart builds", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      confirmedPreferences: {
+        cuisines: ["Insomnia Cookies"],
+        location: "Mission, San Francisco",
+        pickupOrDelivery: "delivery",
+      },
+      selectedRestaurant: {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "User requested Insomnia Cookies",
+        dietaryFit: [],
+      },
+    };
+    const { store } = createStore({
+      jobs: [job({ kind: "cart_build" })],
+      session,
+    });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run");
+      },
+      buildCart: async (_criteria, _restaurant, options) => {
+        expect(options?.timeoutMs).toBe(210_000);
+
+        return {
+          sessionId: "browser_cart_123",
+          output: {
+            restaurantName: "Insomnia Cookies",
+            items: [{ name: "Classic Chocolate Chunk", quantity: 3 }],
+            estimatedTotal: { currency: "usd", cents: 1800 },
+            screenshots: [],
+            status: "draft",
+            blockers: ["Login required before checkout"],
+          },
+          raw: {} as never,
+        };
+      },
+    };
+
+    await expect(processFoodrunJobs(1, { store, browser, notifier: null })).resolves.toMatchObject({
+      processed: 1,
+    });
+  });
+
+  test("uses insomnia cookie names in internal draft fallback", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      confirmedPreferences: {
+        cuisines: ["Insomnia Cookies"],
+        location: "Mission, San Francisco",
+        pickupOrDelivery: "delivery",
+      },
+      selectedRestaurant: {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "User requested Insomnia Cookies",
+        dietaryFit: [],
+      },
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "cart_build" })],
+      session,
+    });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run");
+      },
+      buildCart: async () => {
+        throw new Error("Session session_123 did not complete within 95000ms");
+      },
+    };
+
+    await expect(processFoodrunJobs(1, { store, browser, notifier: null })).resolves.toMatchObject({
+      processed: 1,
+    });
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      cart: {
+        items: [{ name: "Classic Chocolate Chunk", quantity: 1 }],
+      },
+    });
+  });
+
   test("notifies requester when restaurant search is missing a delivery area", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
