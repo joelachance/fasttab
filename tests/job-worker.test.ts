@@ -322,54 +322,7 @@ describe("processFoodrunJobs", () => {
     });
   });
 
-  test("uses a longer browser timeout for insomnia cart builds", async () => {
-    const session: FoodrunOrderSession = {
-      ...baseSession,
-      state: "building_cart",
-      confirmedPreferences: {
-        cuisines: ["Insomnia Cookies"],
-        location: "Mission, San Francisco",
-        pickupOrDelivery: "delivery",
-      },
-      selectedRestaurant: {
-        name: "Insomnia Cookies",
-        orderingUrl: "https://insomniacookies.com/",
-        reason: "User requested Insomnia Cookies",
-        dietaryFit: [],
-      },
-    };
-    const { store } = createStore({
-      jobs: [job({ kind: "cart_build" })],
-      session,
-    });
-    const browser: FoodrunBrowserUse = {
-      searchRestaurants: async () => {
-        throw new Error("searchRestaurants should not run");
-      },
-      buildCart: async (_criteria, _restaurant, options) => {
-        expect(options?.timeoutMs).toBe(210_000);
-
-        return {
-          sessionId: "browser_cart_123",
-          output: {
-            restaurantName: "Insomnia Cookies",
-            items: [{ name: "Classic Chocolate Chunk", quantity: 3 }],
-            estimatedTotal: { currency: "usd", cents: 1800 },
-            screenshots: [],
-            status: "draft",
-            blockers: ["Login required before checkout"],
-          },
-          raw: {} as never,
-        };
-      },
-    };
-
-    await expect(processFoodrunJobs(1, { store, browser, notifier: null })).resolves.toMatchObject({
-      processed: 1,
-    });
-  });
-
-  test("uses insomnia cookie names in internal draft fallback", async () => {
+  test("uses insomnia catalog cart without browser use", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
       state: "building_cart",
@@ -388,24 +341,45 @@ describe("processFoodrunJobs", () => {
     const { store, calls } = createStore({
       jobs: [job({ kind: "cart_build" })],
       session,
+      participants: [
+        participant,
+        { ...participant, participantId: "participant_456", phoneNumber: "+15557654321" },
+        { ...participant, participantId: "participant_789", phoneNumber: "+15559876543" },
+      ],
     });
+    const sent: unknown[] = [];
     const browser: FoodrunBrowserUse = {
       searchRestaurants: async () => {
         throw new Error("searchRestaurants should not run");
       },
       buildCart: async () => {
-        throw new Error("Session session_123 did not complete within 95000ms");
+        throw new Error("buildCart should not run for insomnia catalog cart");
+      },
+    };
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
       },
     };
 
-    await expect(processFoodrunJobs(1, { store, browser, notifier: null })).resolves.toMatchObject({
+    await expect(processFoodrunJobs(1, { store, browser, notifier })).resolves.toMatchObject({
       processed: 1,
     });
-    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
-      cart: {
-        items: [{ name: "Classic Chocolate Chunk", quantity: 1 }],
-      },
-    });
+    const update = calls.find((call) => call.method === "updateOrderSession")?.input as {
+      browserUseSessionId?: string;
+      cart?: { items: Array<{ name: string; price?: { cents: number } }> };
+    };
+    expect(update?.browserUseSessionId).toBe("insomnia_catalog_cart");
+    expect(update?.cart?.items.map((item) => item.name)).toEqual([
+      "Classic Chocolate Chunk",
+      "Deluxe Chocolate Chunk",
+      "Snickerdoodle",
+    ]);
+    expect(update?.cart?.items[0]?.price?.cents).toBe(449);
+    expect(String((sent[0] as { body: string }).body)).toContain("Classic Chocolate Chunk");
+    expect(String((sent[0] as { body: string }).body)).not.toContain("Blocked by:");
+    expect(String((sent[0] as { body: string }).body)).not.toContain("Browser Use could not create");
+    expect(String((sent[0] as { body: string }).body)).toContain("Insomnia menu catalog");
   });
 
   test("notifies requester when restaurant search is missing a delivery area", async () => {

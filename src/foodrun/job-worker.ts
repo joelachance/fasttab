@@ -6,6 +6,13 @@ import {
   hasOfficialDirectOrdering,
   prefersMarketplaceOrdering,
 } from "../modules/browser-use/ordering-urls.js";
+import {
+  buildInsomniaCatalogCart,
+  INSOMNIA_CATALOG_CART_SESSION_ID,
+  insomniaCatalogCartEnabled,
+  isInsomniaBrand,
+  isInsomniaCatalogCart,
+} from "../modules/insomnia-catalog-cart.js";
 import { RestaurantAvailabilityModule } from "../modules/restaurant-availability.js";
 import { SpongeModule } from "../modules/sponge/index.js";
 import { StripeModule } from "../modules/stripe/index.js";
@@ -294,9 +301,15 @@ async function buildCart(
   const participants = await options.store.listParticipants(job.roomId);
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const criteria = buildOrderCriteria(session, participants);
-  const cart = await buildCartWithFallback(browser, criteria, session.selectedRestaurant, {
-    ...browserOptions(options.env, session.selectedRestaurant),
-  });
+  const cart = await buildCartWithFallback(
+    browser,
+    criteria,
+    session.selectedRestaurant,
+    {
+      ...browserOptions(options.env, session.selectedRestaurant),
+    },
+    options.env,
+  );
 
   await options.store.updateOrderSession(job.roomId, {
     state: "confirming_cart",
@@ -330,9 +343,15 @@ async function editCart(
   const participants = await options.store.listParticipants(job.roomId);
   const criteria = buildOrderCriteria(session, participants, stringPayload(job, "editText"));
   const browser = options.browser ?? new BrowserUseModule(options.env);
-  const cart = await buildCartWithFallback(browser, criteria, session.selectedRestaurant, {
-    ...browserOptions(options.env, session.selectedRestaurant),
-  });
+  const cart = await buildCartWithFallback(
+    browser,
+    criteria,
+    session.selectedRestaurant,
+    {
+      ...browserOptions(options.env, session.selectedRestaurant),
+    },
+    options.env,
+  );
 
   await options.store.updateOrderSession(job.roomId, {
     state: "confirming_cart",
@@ -538,7 +557,21 @@ async function buildCartWithFallback(
   criteria: OrderCriteria,
   restaurant: RestaurantOption,
   options: Parameters<FoodrunBrowserUse["buildCart"]>[2],
+  env: Env = process.env,
 ): ReturnType<FoodrunBrowserUse["buildCart"]> {
+  if (insomniaCatalogCartEnabled(env) && isInsomniaBrand(restaurant, criteria)) {
+    const output = buildInsomniaCatalogCart(criteria, restaurant);
+
+    return {
+      sessionId: INSOMNIA_CATALOG_CART_SESSION_ID,
+      output,
+      raw: {
+        id: INSOMNIA_CATALOG_CART_SESSION_ID,
+        output,
+      } as Awaited<ReturnType<FoodrunBrowserUse["buildCart"]>>["raw"],
+    };
+  }
+
   try {
     const cart = await browser.buildCart(criteria, restaurant, options);
 
@@ -677,19 +710,35 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
     : cart.status === "draft" ? "Status: draft cart ready."
     : "Status: checkout-ready cart.";
 
+  const blockerLine = formatCartBlockerLine(cart);
+
   return [
     statusLine,
     cart.status === "blocked" ?
       `I could not build a checkout-ready cart at ${restaurant.name}.${totalLine}`
+    : isInsomniaCatalogCart(cart) ?
+      `I built a demo cart from the Insomnia Cookies menu for your group.${totalLine}`
     : `I checked ${restaurant.name} and built this FastTab option.${totalLine}`,
     items ? `Items: ${items}` : "",
-    cart.blockers.length ? `Blocked by: ${cart.blockers.join(", ")}` : "",
+    blockerLine,
     cart.status === "blocked" ?
       "Reply 'retry cart' to try again, or send a different restaurant or preference."
     : "Reply 'confirm order' to approve this option, 'no' to try another restaurant, or send changes.",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function formatCartBlockerLine(cart: CartSummary): string {
+  if (isInsomniaCatalogCart(cart)) {
+    return cart.blockers[0] ?? "";
+  }
+
+  if (cart.blockers.length) {
+    return `Blocked by: ${cart.blockers.join(", ")}`;
+  }
+
+  return "";
 }
 
 function formatRestaurantFoundText(restaurant: RestaurantOption): string {
