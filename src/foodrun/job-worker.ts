@@ -2,7 +2,10 @@ import { AgentPhoneClient } from "agentphone";
 
 import { envWithDefault, requiredEnv, type Env } from "../env.js";
 import { BrowserUseModule } from "../modules/browser-use/index.js";
-import { prefersMarketplaceOrdering } from "../modules/browser-use/ordering-urls.js";
+import {
+  hasOfficialDirectOrdering,
+  prefersMarketplaceOrdering,
+} from "../modules/browser-use/ordering-urls.js";
 import { RestaurantAvailabilityModule } from "../modules/restaurant-availability.js";
 import { SpongeModule } from "../modules/sponge/index.js";
 import { StripeModule } from "../modules/stripe/index.js";
@@ -196,24 +199,50 @@ async function searchRestaurants(
   const criteria = buildOrderCriteria(session, participants);
   const marketplaceRestaurant = marketplaceRestaurantFromPreferences(session.confirmedPreferences);
 
-  if (marketplaceRestaurant && prefersMarketplaceOrdering(criteria, marketplaceRestaurant)) {
-    await options.store.updateOrderSession(job.roomId, {
-      state: "building_cart",
-      selectedRestaurant: marketplaceRestaurant,
-      browserUseSessionId: null,
-      browserUseLiveUrl: null,
-    });
-    await options.store.enqueueJob({
-      roomId: job.roomId,
-      kind: "cart_build",
-      payload: job.payload,
-    });
-    await notify(
-      job,
-      options,
-      `Status: building cart. I found ${marketplaceRestaurant.name}. I'm checking Grubhub and DoorDash for a delivery cart now.`,
-    );
-    return;
+  if (marketplaceRestaurant) {
+    if (hasOfficialDirectOrdering(marketplaceRestaurant)) {
+      await options.store.updateOrderSession(job.roomId, {
+        state: "building_cart",
+        selectedRestaurant: {
+          ...marketplaceRestaurant,
+          orderingUrl: "https://insomniacookies.com/",
+          reason: "User requested Insomnia Cookies. FastTab will try the official site first.",
+        },
+        browserUseSessionId: null,
+        browserUseLiveUrl: null,
+      });
+      await options.store.enqueueJob({
+        roomId: job.roomId,
+        kind: "cart_build",
+        payload: job.payload,
+      });
+      await notify(
+        job,
+        options,
+        `Status: building cart. I found ${marketplaceRestaurant.name}. I'm opening insomniacookies.com for a delivery cart now.`,
+      );
+      return;
+    }
+
+    if (prefersMarketplaceOrdering(criteria, marketplaceRestaurant)) {
+      await options.store.updateOrderSession(job.roomId, {
+        state: "building_cart",
+        selectedRestaurant: marketplaceRestaurant,
+        browserUseSessionId: null,
+        browserUseLiveUrl: null,
+      });
+      await options.store.enqueueJob({
+        roomId: job.roomId,
+        kind: "cart_build",
+        payload: job.payload,
+      });
+      await notify(
+        job,
+        options,
+        `Status: building cart. I found ${marketplaceRestaurant.name}. I'm checking Grubhub and DoorDash for a delivery cart now.`,
+      );
+      return;
+    }
   }
 
   const candidates = await availabilityScanner.findCandidates(criteria);
@@ -833,7 +862,8 @@ function marketplaceRestaurantFromPreferences(
   if (insomnia) {
     return {
       name: insomnia,
-      reason: "User requested Insomnia Cookies. FastTab will order through Grubhub or DoorDash.",
+      orderingUrl: "https://insomniacookies.com/",
+      reason: "User requested Insomnia Cookies. FastTab will try the official site first.",
       dietaryFit: preferences.dietary ?? [],
     };
   }

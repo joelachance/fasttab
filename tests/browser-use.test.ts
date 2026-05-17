@@ -257,22 +257,25 @@ describe("Browser Use module", () => {
     expect(result.output.items).toHaveLength(1);
   });
 
-  test("buildCartWithOrderingProviders uses parallel marketplace for insomnia", async () => {
+  test("buildCartWithOrderingProviders tries official insomnia site before marketplace", async () => {
     const calls: string[] = [];
     const browser = {
       runTask: async (task: string) => {
         calls.push(task);
 
         return {
-          sessionId: "session_marketplace",
+          sessionId: calls.length === 1 ? "session_direct" : "session_marketplace",
           output: {
             restaurantName: "Insomnia Cookies",
-            items: [{ name: "Chocolate Chunk", quantity: 4, priceUsd: 16 }],
+            items:
+              calls.length === 1 ?
+                []
+              : [{ name: "Chocolate Chunk", quantity: 4, priceUsd: 16 }],
             screenshots: [],
-            status: "checkout_ready",
-            blockers: [],
+            status: calls.length === 1 ? "blocked" : "checkout_ready",
+            blockers: calls.length === 1 ? ["Official site requires login before cart"] : [],
           },
-          raw: { id: "session_marketplace", output: "" },
+          raw: { id: `session_${calls.length}`, output: "" },
         };
       },
     };
@@ -288,7 +291,8 @@ describe("Browser Use module", () => {
       },
     );
 
-    expect(calls).toHaveLength(2);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls[0]).toContain("insomniacookies.com");
     expect(result.output.items).toHaveLength(1);
   });
 

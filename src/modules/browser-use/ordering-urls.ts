@@ -14,10 +14,14 @@ const MARKETPLACE_HOST =
   /doordash\.com|ubereats\.com|grubhub\.com|postmates\.com|seamless\.com/i;
 
 const MARKETPLACE_ONLY_BRAND_PATTERN =
-  /\binsomnia cookies?\b|\bcrumbl cookies?\b|\binsomnia\b.*\bcookies?\b/i;
+  /\bcrumbl cookies?\b/i;
+
+const INSOMNIA_BRAND_PATTERN = /\binsomnia cookies?\b|\binsomnia\b.*\bcookies?\b/i;
 
 const MARKETPLACE_PREFERENCE_PATTERN =
   /\b(grubhub|doordash|door dash|uber eats|uber\s*eats|delivery app|delivery marketplace)\b/i;
+
+const DIRECT_ORDERING_HOST_PATTERN = /insomniacookies\.com/i;
 
 const PROVIDER_HOST: Array<[OrderingProvider, RegExp]> = [
   ["toast", /toasttab\.com|order\.toasttab/i],
@@ -27,6 +31,14 @@ const PROVIDER_HOST: Array<[OrderingProvider, RegExp]> = [
   ["shopify", /myshopify\.com|shopify\.com/i],
   ["blizzfull", /blizzfull\.com/i],
 ];
+
+export function hasOfficialDirectOrdering(restaurant: RestaurantOption): boolean {
+  if (buildOrderingUrlAttempts(restaurant).some((url) => DIRECT_ORDERING_HOST_PATTERN.test(url))) {
+    return true;
+  }
+
+  return INSOMNIA_BRAND_PATTERN.test(restaurant.name);
+}
 
 export function detectOrderingProvider(url: string): OrderingProvider {
   if (MARKETPLACE_HOST.test(url)) {
@@ -119,6 +131,10 @@ export function prefersMarketplaceOrdering(
   ]
     .join(" ")
     .toLowerCase();
+
+  if (hasOfficialDirectOrdering(restaurant)) {
+    return MARKETPLACE_PREFERENCE_PATTERN.test(haystack);
+  }
 
   return (
     MARKETPLACE_ONLY_BRAND_PATTERN.test(haystack) || MARKETPLACE_PREFERENCE_PATTERN.test(haystack)

@@ -285,7 +285,7 @@ describe("processFoodrunJobs", () => {
     });
   });
 
-  test("skips browser restaurant search for insomnia and queues marketplace cart build", async () => {
+  test("skips browser restaurant search for insomnia and queues official-site cart build", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
       state: "searching_restaurants",
@@ -318,7 +318,7 @@ describe("processFoodrunJobs", () => {
       kind: "cart_build",
     });
     expect(sent[0]).toMatchObject({
-      body: "Status: building cart. I found Insomnia Cookies. I'm checking Grubhub and DoorDash for a delivery cart now.",
+      body: "Status: building cart. I found Insomnia Cookies. I'm opening insomniacookies.com for a delivery cart now.",
     });
   });
 

@@ -12,6 +12,7 @@ import { envWithDefault, requiredEnv, type Env } from "../../env.js";
 import type { CartSummary, Money, OrderCriteria, RestaurantOption } from "../../types.js";
 import {
   buildOrderingUrlAttempts,
+  hasOfficialDirectOrdering,
   prefersMarketplaceOrdering,
   shouldDiscoverOrderingProviders,
   shouldTryMarketplaceOrdering,
@@ -230,9 +231,6 @@ export async function buildCartWithOrderingProviders(
   }
 
   for (const orderingUrl of urlAttempts) {
-    if (prefersMarketplaceOrdering(criteria, restaurant)) {
-      break;
-    }
     const result = await runCartTaskWithBlockedFallback(
       browser,
       criteria,
@@ -593,13 +591,14 @@ Ordering provider strategy:
 - Open the best ordering page you find and build the cart there.
 - Spend up to about 90 seconds across provider attempts before returning blocked JSON.
 `
-    : prefersMarketplaceOrdering(criteria, restaurant) ?
+    : hasOfficialDirectOrdering(restaurant) ?
       `
 Ordering provider strategy:
 - Stay on ${restaurant.name}. Do not switch to a different restaurant.
-- This request targets a delivery-marketplace brand. Start on Grubhub or DoorDash for this restaurant near the order location.
-- Prefer Grubhub first, then DoorDash.
+- Start at the official Insomnia Cookies ordering URL below. Enter the delivery address and store if prompted.
 - Build a guest-visible cart when possible; otherwise return a draft cart from visible menu items.
+- If the official site blocks guest cart building, try Grubhub and DoorDash for this same restaurant.
+- Spend up to about 90 seconds on the official site before falling back to marketplaces.
 `
     : `
 Ordering provider strategy:

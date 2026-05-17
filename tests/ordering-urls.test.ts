@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildOrderingUrlAttempts,
   detectOrderingProvider,
+  hasOfficialDirectOrdering,
   prefersMarketplaceOrdering,
   shouldDiscoverOrderingProviders,
   shouldTryMarketplaceOrdering,
@@ -45,7 +46,7 @@ describe("ordering urls", () => {
     ]);
   });
 
-  test("detects insomnia cookies as marketplace-first", () => {
+  test("prefers official insomnia site unless marketplace is requested", () => {
     const restaurant = {
       name: "Insomnia Cookies",
       orderingUrl: "https://insomniacookies.com/",
@@ -53,8 +54,15 @@ describe("ordering urls", () => {
       dietaryFit: [],
     };
 
-    expect(prefersMarketplaceOrdering(criteria, restaurant)).toBe(true);
-    expect(shouldTryMarketplaceOrdering(criteria, restaurant)).toBe(true);
+    expect(hasOfficialDirectOrdering(restaurant)).toBe(true);
+    expect(prefersMarketplaceOrdering(criteria, restaurant)).toBe(false);
+    expect(shouldTryMarketplaceOrdering(criteria, restaurant)).toBe(false);
+    expect(
+      prefersMarketplaceOrdering(
+        { ...criteria, preferences: ["Insomnia Cookies", "Grubhub"] },
+        restaurant,
+      ),
+    ).toBe(true);
   });
 
   test("requests provider discovery for blizzfull-only restaurants", () => {
