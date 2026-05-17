@@ -238,6 +238,8 @@ Cartability requirements:
 - Prefer restaurants with direct online ordering that lets a guest add items and view a cart before login or payment.
 - Prefer Toast first, then Square, ChowNow, BentoBox, Shopify, or an official restaurant ordering page.
 - Avoid DoorDash, Uber Eats, Grubhub, and other marketplaces unless no direct ordering option exists.
+- Check the ordering page immediately for "currently not accepting orders", "closed", unavailable pickup, or disabled add-to-cart controls.
+- Do not return restaurants that are not currently accepting online orders for the requested pickup/delivery mode.
 - If a restaurant looks good but its cart cannot be built as a guest, skip it and try another restaurant.
 - Return the most cartable option first because the next step will build a sample cart from the first result.
 
@@ -281,8 +283,10 @@ Build a takeout cart for the group and stop before payment. Return raw JSON only
 Safety rails:
 - Do not place the order. Do not enter payment information.
 - Prefer a real website cart when possible, but an internal draft cart is acceptable.
+- Before choosing items, immediately check whether online ordering is currently available. If the page says "currently not accepting orders", is closed, has unavailable pickup/delivery, or disables add-to-cart, do not build a draft there yet.
 - Prefer Toast ordering pages first. If the provided URL is DoorDash, Uber Eats, Grubhub, or cannot build a guest cart, search for the same restaurant on Toast, Square, ChowNow, BentoBox, Shopify, or the official restaurant site.
-- If that restaurant cannot support a guest cart, try a comparable nearby restaurant that matches the order context and uses Toast or another direct ordering provider.
+- If that restaurant cannot support a guest cart or is not currently accepting online orders, try a comparable nearby restaurant that matches the order context and uses Toast or another direct ordering provider.
+- Only return a draft cart for a closed/unavailable restaurant after trying comparable nearby direct-ordering restaurants.
 - If checkout requires login, payment, unavailable items, or another site blocker, still build a draft cart from visible menu items before reporting the blocker.
 - Use "status": "draft" when you found plausible menu items but could not make a checkout-ready website cart.
 - Use "status": "blocked" only when you cannot find enough menu information to choose items.

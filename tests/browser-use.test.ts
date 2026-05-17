@@ -38,6 +38,7 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("Do not place an order");
     expect(prompt).toContain("Prefer Toast first");
     expect(prompt).toContain("Avoid DoorDash");
+    expect(prompt).toContain("currently accepting online orders");
     expect(prompt).toContain("Return the most cartable option first");
     expect(prompt).toContain("Hayes Valley");
     expect(prompt).toContain("Thai");
@@ -53,6 +54,8 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("https://example.com/order");
     expect(prompt).toContain("Return raw JSON only");
     expect(prompt).toContain("Prefer Toast ordering pages first");
+    expect(prompt).toContain("Before choosing items");
+    expect(prompt).toContain("Only return a draft cart for a closed/unavailable restaurant");
     expect(prompt).toContain("try a comparable nearby restaurant");
     expect(prompt).toContain('"status": "blocked"');
     expect(prompt).toContain("internal draft cart is acceptable");

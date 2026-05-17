@@ -132,7 +132,8 @@ export function buildCartPromptFromRestaurant(input: {
 }): string {
   return `
 Build a takeout cart from this selected restaurant. Do not place the order. Do not enter payment information. Stop before payment and report blockers.
-Prefer Toast ordering pages first. If the URL is DoorDash, Uber Eats, Grubhub, or cannot build a guest cart, search for Toast, Square, ChowNow, BentoBox, Shopify, or the official restaurant ordering page. If that still cannot build a guest cart, try a comparable nearby restaurant.
+Before choosing items, immediately check whether online ordering is currently available. If the page says "currently not accepting orders", is closed, has unavailable pickup/delivery, or disables add-to-cart, try another direct ordering restaurant first.
+Prefer Toast ordering pages first. If the URL is DoorDash, Uber Eats, Grubhub, unavailable, or cannot build a guest cart, search for Toast, Square, ChowNow, BentoBox, Shopify, or the official restaurant ordering page. If that still cannot build a guest cart, try a comparable nearby restaurant.
 
 Original request:
 ${input.originalRequest}

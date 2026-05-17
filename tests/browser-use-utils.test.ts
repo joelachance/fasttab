@@ -101,6 +101,7 @@ describe("Browser Use utils", () => {
 
     expect(prompt).toContain("Do not place the order");
     expect(prompt).toContain("Prefer Toast ordering pages first");
+    expect(prompt).toContain("currently available");
     expect(prompt).toContain("https://basil.example.com/order");
     expect(prompt).toContain("Avoid peanuts");
   });
