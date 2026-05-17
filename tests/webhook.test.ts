@@ -37,7 +37,7 @@ describe("handleAgentPhoneWebhook", () => {
         agentId: "agent_123",
         toNumber: "+15551234567",
         numberId: "num_123",
-        body: "Foodrun got your text. I can save preferences and start food ordering once the text flow is wired.",
+        body: "Hi, this is your Fast Hab agent. What would you like to order?",
       },
     ]);
   });

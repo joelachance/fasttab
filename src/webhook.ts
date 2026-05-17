@@ -183,8 +183,8 @@ export async function handleAgentPhoneWebhook(
   const body = stringField(payload.data, "body", "text", "message", "content") ?? "";
   const reply =
     body.trim() ?
-      "Foodrun got your text. I can save preferences and start food ordering once the text flow is wired."
-    : "Foodrun got your text.";
+      "Hi, this is your Fast Hab agent. What would you like to order?"
+    : "Hi, this is your Fast Hab agent.";
   const sender = options.textSender ?? new AgentPhoneSdkTextSender(options.env);
 
   try {
