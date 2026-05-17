@@ -306,6 +306,24 @@ export class OrderSessionStore {
     return mapJob(rows[0]);
   }
 
+  async requeueStaleRunningJobs(maxAgeSeconds: number): Promise<number> {
+    const rows = (await this.sql.query(
+      `
+        UPDATE foodrun_jobs SET
+          status = 'queued',
+          locked_at = NULL,
+          last_error = 'Requeued after worker stopped responding'
+        WHERE status = 'running'
+          AND locked_at IS NOT NULL
+          AND locked_at < now() - ($1 * interval '1 second')
+        RETURNING job_id
+      `,
+      [maxAgeSeconds],
+    )) as Array<{ job_id: string }>;
+
+    return rows.length;
+  }
+
   async claimNextJob(kinds: FoodrunJobKind[]): Promise<FoodrunJob | null> {
     if (kinds.length === 0) {
       return null;

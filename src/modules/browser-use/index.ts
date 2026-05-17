@@ -206,10 +206,13 @@ export class BrowserUseModule {
   }
 }
 
+export type MarketplaceProvider = "grubhub" | "doordash";
+
 export type BuildCartPromptOptions = {
   orderingUrl?: string;
   discoverProviders?: boolean;
   useMarketplace?: boolean;
+  marketplaceProvider?: MarketplaceProvider;
 };
 
 export async function buildCartWithOrderingProviders(
@@ -223,20 +226,7 @@ export async function buildCartWithOrderingProviders(
   let lastResult: BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>> | undefined;
 
   if (prefersMarketplaceOrdering(criteria, restaurant)) {
-    const marketplace = await runCartTaskWithBlockedFallback(
-      browser,
-      criteria,
-      restaurant,
-      options,
-      { useMarketplace: true },
-    );
-    lastResult = marketplace;
-
-    if (isUsefulCartResult(marketplace.output)) {
-      return marketplace;
-    }
-
-    blockers.push(...marketplace.output.blockers);
+    return buildMarketplaceCartInParallel(browser, criteria, restaurant, options);
   }
 
   for (const orderingUrl of urlAttempts) {
@@ -312,6 +302,82 @@ export async function buildCartWithOrderingProviders(
       } as unknown as SessionResult<z.output<typeof CartBuildOutputSchema>>,
     }
   );
+}
+
+const MARKETPLACE_PARALLEL_TIMEOUT_MS = 90_000;
+
+export async function buildMarketplaceCartInParallel(
+  browser: Pick<BrowserUseModule, "runTask">,
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  options?: BrowserUseRunOptions,
+): Promise<BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>>> {
+  const timeoutMs = options?.timeoutMs ?? MARKETPLACE_PARALLEL_TIMEOUT_MS;
+  const providers: MarketplaceProvider[] = ["grubhub", "doordash"];
+  const attempts = await Promise.all(
+    providers.map((marketplaceProvider) =>
+      runCartTaskWithBlockedFallback(
+        browser,
+        criteria,
+        restaurant,
+        { ...options, timeoutMs },
+        { useMarketplace: true, marketplaceProvider },
+      ),
+    ),
+  );
+
+  const useful = attempts.find((attempt) => isUsefulCartResult(attempt.output));
+
+  if (useful) {
+    return useful;
+  }
+
+  const best = pickBestCartAttempt(attempts);
+
+  if (best) {
+    return best;
+  }
+
+  const blockers = uniqueStrings(attempts.flatMap((attempt) => attempt.output.blockers));
+
+  return {
+    sessionId: attempts[0]?.sessionId ?? "browser_use_blocked",
+    output: {
+      restaurantName: restaurant.name,
+      items: [],
+      screenshots: [],
+      status: "blocked",
+      blockers: blockers.length ? blockers : ["Grubhub and DoorDash cart builds did not return items."],
+    },
+    raw: {
+      id: attempts[0]?.sessionId ?? "browser_use_blocked",
+      output: blockers.join("; "),
+    } as unknown as SessionResult<z.output<typeof CartBuildOutputSchema>>,
+  };
+}
+
+function pickBestCartAttempt(
+  attempts: BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>>[],
+): BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>> | undefined {
+  return attempts
+    .filter((attempt) => attempt.output.items.length > 0 || attempt.output.checkoutUrl)
+    .sort((left, right) => scoreCartAttempt(right.output) - scoreCartAttempt(left.output))[0];
+}
+
+function scoreCartAttempt(output: z.output<typeof CartBuildOutputSchema>): number {
+  let score = output.items.length * 10;
+
+  if (output.status === "checkout_ready") {
+    score += 100;
+  }
+  if (output.checkoutUrl) {
+    score += 20;
+  }
+  if (output.estimatedTotalUsd !== undefined) {
+    score += 5;
+  }
+
+  return score;
 }
 
 export async function runCartTaskWithBlockedFallback(
@@ -468,6 +534,45 @@ Return JSON shaped like:
 `.trim();
 }
 
+function buildMarketplaceProviderStrategy(
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  location: string,
+  marketplaceProvider?: MarketplaceProvider,
+): string {
+  const shared = `
+- Stay on ${restaurant.name}. Do not switch to a different restaurant.
+- Build a guest-visible cart with real menu items and prices when the marketplace allows browsing without payment.
+- If login is required before cart, return a draft cart from visible menu prices and note the login blocker.`;
+
+  if (marketplaceProvider === "grubhub") {
+    return `
+Ordering provider strategy:
+${shared}
+- Use grubhub.com only. Do not open DoorDash, Uber Eats, or other sites.
+- Find the ${restaurant.name} store nearest ${location} that supports ${criteria.pickupOrDelivery}.
+- Add a small group cart (about ${criteria.participantCount} items) from the menu.
+- Spend at most 75 seconds, then return JSON even if the cart is incomplete.`;
+  }
+
+  if (marketplaceProvider === "doordash") {
+    return `
+Ordering provider strategy:
+${shared}
+- Use doordash.com only. Do not open Grubhub, Uber Eats, or other sites.
+- Find the ${restaurant.name} store nearest ${location} that supports ${criteria.pickupOrDelivery}.
+- Add a small group cart (about ${criteria.participantCount} items) from the menu.
+- Spend at most 75 seconds, then return JSON even if the cart is incomplete.`;
+  }
+
+  return `
+Ordering provider strategy:
+${shared}
+- Search Grubhub and DoorDash for the correct store near ${location}.
+- Prefer Grubhub first, then DoorDash.
+- Spend up to about 90 seconds across marketplace attempts before returning blocked JSON.`;
+}
+
 export function buildCartPrompt(
   criteria: OrderCriteria,
   restaurant: RestaurantOption,
@@ -478,15 +583,7 @@ export function buildCartPrompt(
     promptOptions.orderingUrl ?? restaurant.orderingUrl ?? restaurant.url ?? "not provided";
   const providerStrategy =
     promptOptions.useMarketplace ?
-      `
-Ordering provider strategy:
-- Stay on ${restaurant.name}. Do not switch to a different restaurant.
-- This restaurant likely orders through Grubhub or DoorDash rather than Toast. Search Grubhub and DoorDash for the correct store near the delivery location.
-- Prefer Grubhub first, then DoorDash, then Uber Eats only if needed.
-- Build a guest-visible cart with real menu items and prices when the marketplace allows browsing without payment.
-- If the marketplace requires login before showing a cart, return a draft cart from visible menu prices and note the login blocker.
-- Spend up to about 90 seconds across marketplace attempts before returning blocked JSON.
-`
+      buildMarketplaceProviderStrategy(criteria, restaurant, location, promptOptions.marketplaceProvider)
     : promptOptions.discoverProviders ?
       `
 Ordering provider strategy:

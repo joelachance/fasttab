@@ -188,4 +188,15 @@ describe("OrderSessionStore", () => {
     expect(calls[0]?.params).toEqual(["job_123"]);
     expect(calls[1]?.params).toEqual(["job_456", "Browser Use timed out"]);
   });
+
+  test("requeues stale running jobs", async () => {
+    const { sql, calls } = createFakeSql([[{ job_id: "job_stale" }]]);
+    const store = new OrderSessionStore(sql);
+
+    await expect(store.requeueStaleRunningJobs(120)).resolves.toBe(1);
+
+    expect(calls[0]?.query).toContain("status = 'queued'");
+    expect(calls[0]?.query).toContain("locked_at < now()");
+    expect(calls[0]?.params).toEqual([120]);
+  });
 });

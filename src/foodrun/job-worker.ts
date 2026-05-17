@@ -19,6 +19,7 @@ import type {
 import { shouldPlaceLiveOrders } from "./runtime-config.js";
 
 export const FOODRUN_JOB_MAX_DURATION_SECONDS = 300;
+export const FOODRUN_STALE_JOB_SECONDS = 120;
 
 export type ProcessFoodrunJobsResult = {
   processed: number;
@@ -32,6 +33,7 @@ export type FoodrunJobStore = Pick<
   | "failJob"
   | "getOrderSession"
   | "listParticipants"
+  | "requeueStaleRunningJobs"
   | "updateOrderSession"
   | "appendEvent"
   | "enqueueJob"
@@ -106,6 +108,10 @@ export async function processFoodrunJobs(
 ): Promise<ProcessFoodrunJobsResult> {
   const store = options.store ?? new OrderSessionStore();
   let processed = 0;
+
+  if ("requeueStaleRunningJobs" in store) {
+    await store.requeueStaleRunningJobs(FOODRUN_STALE_JOB_SECONDS);
+  }
 
   while (processed < limit) {
     const job = await store.claimNextJob(SUPPORTED_JOB_KINDS);
@@ -255,7 +261,7 @@ async function buildCart(
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const criteria = buildOrderCriteria(session, participants);
   const cart = await buildCartWithFallback(browser, criteria, session.selectedRestaurant, {
-    ...browserOptions(options.env),
+    ...browserOptions(options.env, session.selectedRestaurant),
   });
 
   await options.store.updateOrderSession(job.roomId, {
@@ -291,7 +297,7 @@ async function editCart(
   const criteria = buildOrderCriteria(session, participants, stringPayload(job, "editText"));
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const cart = await buildCartWithFallback(browser, criteria, session.selectedRestaurant, {
-    ...browserOptions(options.env),
+    ...browserOptions(options.env, session.selectedRestaurant),
   });
 
   await options.store.updateOrderSession(job.roomId, {
@@ -468,11 +474,13 @@ function buildOrderCriteria(
   };
 }
 
-function browserOptions(env: Env = process.env) {
+function browserOptions(env: Env = process.env, restaurant?: RestaurantOption) {
+  const criteriaHint = restaurant?.name ?? "";
+
   return {
     keepAlive: true,
     maxCostUsd: Number(env.BROWSER_USE_MAX_COST_USD ?? 2),
-    timeoutMs: 240_000,
+    timeoutMs: /insomnia|crumbl cookies?/i.test(criteriaHint) ? 95_000 : 240_000,
   };
 }
 

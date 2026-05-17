@@ -6,6 +6,7 @@ import {
   BrowserPromptOutputSchema,
   BrowserUseModule,
   buildCartWithOrderingProviders,
+  buildMarketplaceCartInParallel,
   buildRestaurantAvailabilityPrompt,
   buildCartPrompt,
   buildRestaurantSearchPrompt,
@@ -193,6 +194,102 @@ describe("Browser Use module", () => {
 
     expect(prompt).toContain("Grubhub and DoorDash");
     expect(prompt).toContain("Prefer Grubhub first");
+  });
+
+  test("buildCartPrompt marketplace grubhub mode scopes to grubhub only", () => {
+    const prompt = buildCartPrompt(
+      criteria,
+      {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "Cookie delivery",
+        dietaryFit: [],
+      },
+      { useMarketplace: true, marketplaceProvider: "grubhub" },
+    );
+
+    expect(prompt).toContain("grubhub.com only");
+    expect(prompt).not.toContain("doordash.com only");
+  });
+
+  test("buildMarketplaceCartInParallel runs grubhub and doordash concurrently", async () => {
+    const calls: string[] = [];
+    const browser = {
+      runTask: async (task: string) => {
+        calls.push(task);
+
+        const provider =
+          task.includes("grubhub.com only") ? "grubhub" : task.includes("doordash.com only") ? "doordash" : "unknown";
+
+        return {
+          sessionId: `session_${provider}`,
+          output: {
+            restaurantName: "Insomnia Cookies",
+            items:
+              provider === "grubhub" ?
+                [{ name: "Classic Cookie", quantity: 6, priceUsd: 24 }]
+              : [],
+            screenshots: [],
+            status: provider === "grubhub" ? "checkout_ready" : "blocked",
+            blockers: provider === "grubhub" ? [] : ["DoorDash login required"],
+          },
+          raw: { id: `session_${provider}`, output: "" },
+        };
+      },
+    };
+
+    const result = await buildMarketplaceCartInParallel(
+      browser,
+      { ...criteria, preferences: ["Insomnia Cookies"] },
+      {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "Cookie delivery",
+        dietaryFit: [],
+      },
+      { timeoutMs: 90_000 },
+    );
+
+    expect(calls).toHaveLength(2);
+    expect(calls.some((task) => task.includes("grubhub.com only"))).toBe(true);
+    expect(calls.some((task) => task.includes("doordash.com only"))).toBe(true);
+    expect(result.output.status).toBe("checkout_ready");
+    expect(result.output.items).toHaveLength(1);
+  });
+
+  test("buildCartWithOrderingProviders uses parallel marketplace for insomnia", async () => {
+    const calls: string[] = [];
+    const browser = {
+      runTask: async (task: string) => {
+        calls.push(task);
+
+        return {
+          sessionId: "session_marketplace",
+          output: {
+            restaurantName: "Insomnia Cookies",
+            items: [{ name: "Chocolate Chunk", quantity: 4, priceUsd: 16 }],
+            screenshots: [],
+            status: "checkout_ready",
+            blockers: [],
+          },
+          raw: { id: "session_marketplace", output: "" },
+        };
+      },
+    };
+
+    const result = await buildCartWithOrderingProviders(
+      browser,
+      { ...criteria, preferences: ["Insomnia Cookies"] },
+      {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "Cookie delivery",
+        dietaryFit: [],
+      },
+    );
+
+    expect(calls).toHaveLength(2);
+    expect(result.output.items).toHaveLength(1);
   });
 
   test("buildCartWithOrderingProviders retries discovery after blocked provider", async () => {

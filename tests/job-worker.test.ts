@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  FOODRUN_STALE_JOB_SECONDS,
   processFoodrunJobs,
   type FoodrunBrowserUse,
   type FoodrunJobNotifier,
@@ -62,6 +63,7 @@ function createStore(input: {
   return {
     calls,
     store: {
+      requeueStaleRunningJobs: async () => 0,
       claimNextJob: async () => input.jobs.shift() ?? null,
       completeJob: async (jobId) => {
         calls.push({ method: "completeJob", input: jobId });
@@ -87,6 +89,21 @@ function createStore(input: {
 }
 
 describe("processFoodrunJobs", () => {
+  test("requeues stale running jobs before claiming work", async () => {
+    let requeued = false;
+    const { store } = createStore({ jobs: [] });
+    store.requeueStaleRunningJobs = async (maxAgeSeconds) => {
+      requeued = true;
+      expect(maxAgeSeconds).toBe(FOODRUN_STALE_JOB_SECONDS);
+      return 2;
+    };
+
+    await expect(processFoodrunJobs(1, { store, notifier: null })).resolves.toMatchObject({
+      processed: 0,
+    });
+    expect(requeued).toBe(true);
+  });
+
   test("runs restaurant search and enqueues cart build", async () => {
     const { store, calls } = createStore({ jobs: [job()] });
     const sent: unknown[] = [];
