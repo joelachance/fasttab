@@ -1,0 +1,41 @@
+{
+  "siteTitle": "fasttab.cc",
+  "heroTitle": "Order Food. Split the Tab. Enjoy.",
+  "subtitle": {
+    "linkText": "Text FastTab right now",
+    "after": " to order based on everyone's preferences, and split the bill in minutes."
+  },
+  "cta": {
+    "phone": "+14126543597",
+    "phoneDisplay": "(412) 654-3597",
+    "body": "Hey FastTab, I'm hungry!",
+    "note": "Opens Messages on iPhone and Mac."
+  },
+  "messages": [
+    {
+      "speaker": "Maya",
+      "text": "Dinner was $168. I paid. Can someone split it?",
+      "side": "left"
+    },
+    {
+      "speaker": "Noah",
+      "text": "I had the burger, fries, and one drink.",
+      "side": "right"
+    },
+    {
+      "speaker": "FastTab",
+      "text": "Send the receipt. I will split tax, tip, and items by person.",
+      "side": "left"
+    },
+    {
+      "speaker": "FastTab",
+      "text": "Maya $74.20, Noah $48.65, Priya $79.75. Want pay links?",
+      "side": "left"
+    },
+    {
+      "speaker": "Priya",
+      "text": "Yes please.",
+      "side": "right"
+    }
+  ]
+}
