@@ -4,6 +4,7 @@
     "": {
       "name": "fasttab-agentphone",
       "dependencies": {
+        "@neondatabase/serverless": "^1.1.0",
         "@paysponge/sdk": "^0.1.94",
         "agentmail": "^0.5.2",
         "agentphone": "1.0.10",
@@ -76,6 +77,8 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.28.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-zF3ag/gfiCe6U2iczcRzSYJKH1DCI+ByzSENHlM2FcDbEeo5Zd2C86Aq0tKUYAJJ1obRP84ymxIAksZUcdztHA=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.0", "", { "os": "win32", "cpu": "x64" }, "sha512-pEl1bO9mfAmIC+tW5btTmrKaujg3zGtUmWNdCw/xs70FBjwAL3o9OEKNHvNmnyylD6ubxUERiEhdsL0xBQ9efw=="],
+
+    "@neondatabase/serverless": ["@neondatabase/serverless@1.1.0", "", {}, "sha512-r3ZZhRjEcfEdKIZnoB1RusNgvHuaBRqfCzV4Gi+5A9yUX0S4HTws/ASWqt13wL4y4I+0rqsWGdA2w7EQXHi3+Q=="],
 
     "@paysponge/sdk": ["@paysponge/sdk@0.1.94", "", { "dependencies": { "@clack/prompts": "^1.1.0", "clipboardy": "^4.0.0", "commander": "^14.0.3", "open": "^10.1.0", "posthog-node": "^5.28.0", "zod": "^3.25.76" }, "peerDependencies": { "@anthropic-ai/sdk": ">=0.30.0" }, "optionalPeers": ["@anthropic-ai/sdk"], "bin": { "spongewallet": "dist/bin/cli.js" } }, "sha512-nHdnZc3FvuBqNkrpGistPp2EqKIRsDesL2KmKnLbtZ34AoFW+OfhWKoDWXHbBAvWSPk3+FRqxKGi9G4707mDlw=="],
 

@@ -2,6 +2,11 @@
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
   "outputDirectory": "public",
+  "functions": {
+    "api/jobs/process.ts": {
+      "maxDuration": 300
+    }
+  },
   "rewrites": [
     {
       "source": "/health",

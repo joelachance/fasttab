@@ -1,8 +1,13 @@
 import crypto from "node:crypto";
 
+import { AgentPhoneClient } from "agentphone";
+
+import { envWithDefault, requiredEnv, type Env } from "./env.js";
+
 const WEBHOOK_TOLERANCE_SECONDS = 5 * 60;
 
 export type AgentPhoneChannel = "sms" | "mms" | "imessage" | "voice";
+export type AgentPhoneTextChannel = Exclude<AgentPhoneChannel, "voice">;
 
 export type AgentPhoneWebhookPayload =
   | AgentPhoneMessageWebhook
@@ -44,12 +49,33 @@ export type WebhookHeaders = {
   timestamp?: string;
 };
 
-export type VoiceWebhookResponse = {
-  text: string;
-  hangup?: boolean;
-  action?: "transfer" | "hangup";
-  digits?: string;
+export type AgentPhoneTextSender = {
+  sendText(input: { agentId: string; toNumber: string; body: string }): Promise<unknown>;
 };
+
+export type AgentPhoneWebhookHandlerOptions = {
+  textSender?: AgentPhoneTextSender;
+  env?: Env;
+};
+
+class AgentPhoneSdkTextSender implements AgentPhoneTextSender {
+  private readonly client: AgentPhoneClient;
+
+  constructor(private readonly env: Env = process.env) {
+    this.client = new AgentPhoneClient({
+      token: requiredEnv(env, "AGENTPHONE_API_KEY"),
+      baseUrl: envWithDefault(env, "AGENTPHONE_API_BASE", "https://api.agentphone.ai/v1"),
+    });
+  }
+
+  sendText(input: { agentId: string; toNumber: string; body: string }): Promise<unknown> {
+    return this.client.messages.sendMessage({
+      agent_id: input.agentId,
+      to_number: input.toNumber,
+      body: input.body,
+    });
+  }
+}
 
 export function verifyAgentPhoneWebhook(
   rawBody: string,
@@ -93,14 +119,15 @@ export function parseAgentPhoneWebhook(rawBody: string): AgentPhoneWebhookPayloa
 
 export async function handleAgentPhoneWebhook(
   payload: AgentPhoneWebhookPayload,
+  options: AgentPhoneWebhookHandlerOptions = {},
 ): Promise<Response> {
   if (payload.event === "agent.call_ended") {
-    console.log("AgentPhone call ended", {
+    console.log("Ignoring AgentPhone call event for text-only agent", {
       agentId: payload.agentId,
       callId: payload.data.callId,
       durationSeconds: payload.data.durationSeconds,
     });
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, ignored: true });
   }
 
   if (payload.event === "agent.reaction") {
@@ -112,11 +139,12 @@ export async function handleAgentPhoneWebhook(
     return Response.json({ ok: true });
   }
 
-  if (payload.channel === "voice") {
-    const response: VoiceWebhookResponse = {
-      text: buildVoiceReply(payload),
-    };
-    return Response.json(response);
+  if (!isTextChannel(payload.channel)) {
+    console.log("Ignoring non-text AgentPhone message", {
+      agentId: payload.agentId,
+      channel: payload.channel,
+    });
+    return Response.json({ ok: true, ignored: true });
   }
 
   console.log("AgentPhone message", {
@@ -126,17 +154,42 @@ export async function handleAgentPhoneWebhook(
     conversationId: payload.data.conversationId,
   });
 
+  const fromNumber = stringField(payload.data, "from", "fromNumber", "from_number");
+
+  if (!fromNumber) {
+    return Response.json({ ok: true, ignored: true });
+  }
+
+  const body = stringField(payload.data, "body", "text", "message", "content") ?? "";
+  const reply =
+    body.trim() ?
+      "Foodrun got your text. I can save preferences and start food ordering once the text flow is wired."
+    : "Foodrun got your text.";
+  const sender = options.textSender ?? new AgentPhoneSdkTextSender(options.env);
+
+  await sender.sendText({
+    agentId: payload.agentId,
+    toNumber: fromNumber,
+    body: reply,
+  });
+
   return Response.json({ ok: true });
 }
 
-function buildVoiceReply(payload: AgentPhoneMessageWebhook): string {
-  const transcript = payload.data.transcript;
+function isTextChannel(channel: AgentPhoneChannel): channel is AgentPhoneTextChannel {
+  return channel === "sms" || channel === "mms" || channel === "imessage";
+}
 
-  if (typeof transcript === "string" && transcript.trim()) {
-    return `I heard: ${transcript}`;
+function stringField(record: Record<string, unknown>, ...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = record[name];
+
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
   }
 
-  return "How can I help?";
+  return undefined;
 }
 
 function timingSafeEqual(a: string, b: string): boolean {

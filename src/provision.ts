@@ -11,8 +11,6 @@ async function main(): Promise<void> {
       await client.agents.getAgent({ agent_id: agentId })
     : await client.agents.createAgent({
         name: process.env.AGENTPHONE_AGENT_NAME ?? "Fasttab Agent",
-        voiceMode: "webhook",
-        beginMessage: "Hello, how can I help?",
       });
 
   const webhook = await client.webhooks.createOrUpdateWebhook({
