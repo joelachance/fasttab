@@ -1,13 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import {
-  FOODRUN_JOB_MAX_DURATION_SECONDS,
-  processFoodrunJobs,
-} from "../../src/foodrun/job-worker.js";
+import { processFoodrunJobs } from "../../src/foodrun/job-worker.js";
 import { headerValue, sendJson } from "../../src/node-http.js";
 
 export const config = {
-  maxDuration: FOODRUN_JOB_MAX_DURATION_SECONDS,
+  maxDuration: 300,
 };
 
 export default async function handler(
