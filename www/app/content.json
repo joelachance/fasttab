@@ -14,28 +14,76 @@
   "messages": [
     {
       "speaker": "Maya",
-      "text": "Dinner was $168. I paid. Can someone split it?",
-      "side": "left"
+      "text": "Anyone up for some food?",
+      "side": "right"
     },
     {
       "speaker": "Noah",
-      "text": "I had the burger, fries, and one drink.",
+      "text": "I'm dying for pizza, just no 'olives'",
       "side": "right"
     },
     {
       "speaker": "FastTab",
-      "text": "Send the receipt. I will split tax, tip, and items by person.",
+      "text": "I found a great pizza spot. Ordering now...",
       "side": "left"
     },
     {
       "speaker": "FastTab",
-      "text": "Maya $74.20, Noah $48.65, Priya $79.75. Want pay links?",
+      "text": "I ordered a pizza (no olives). The total was $22.44. I'll send payment links.",
       "side": "left"
     },
     {
-      "speaker": "Priya",
-      "text": "Yes please.",
+      "speaker": "Maya",
+      "text": "Thanks!",
       "side": "right"
     }
-  ]
+  ],
+  "features": [
+    {
+      "icon": "search",
+      "title": "Find restaurants with ease.",
+      "body": "Let FastTab scout and suggest a perfect spot based on your food preferences."
+    },
+    {
+      "icon": "message",
+      "title": "Order in a text.",
+      "body": "Simply text our number and we'll order food for you, saving your preferences."
+    },
+    {
+      "icon": "split",
+      "title": "Split bills instantly.",
+      "body": "Everyone gets a secure payment link. We split the bill automatically, no calculator needed."
+    }
+  ],
+  "stats": [
+    {
+      "value": "<1min",
+      "label": "Average order time"
+    },
+    {
+      "value": "1000+",
+      "label": "Restaurants supported"
+    },
+    {
+      "value": "1% fee",
+      "label": "Minimum fees"
+    }
+  ],
+  "footer": {
+    "copyright": "© 2026 FastTab. All rights reserved.",
+    "hackathon": {
+      "beforeLogo": "Made for fun at the AgentPhone",
+      "afterLogo": "Hackathon"
+    },
+    "links": [
+      {
+        "label": "Text FastTab",
+        "href": "sms"
+      },
+      {
+        "label": "Contact us",
+        "href": "mailto:hi@satori.sh"
+      }
+    ]
+  }
 }
