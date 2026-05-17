@@ -165,7 +165,7 @@ describe("processFoodrunJobs", () => {
         throw new Error("searchRestaurants should not run in the cart_build job");
       },
       buildCart: async (_criteria, _restaurant, options) => {
-        expect(options?.sessionId).toBe("browser_search_123");
+        expect(options?.sessionId).toBeUndefined();
 
         return {
         sessionId: "browser_cart_123",
@@ -249,6 +249,55 @@ describe("processFoodrunJobs", () => {
     });
     expect(sent[0]).toMatchObject({
       body: "I found Mission Thai, but couldn't build a draft cart yet. Reply 'retry cart' and I'll try again.",
+    });
+  });
+
+  test("texts blocked cart status instead of inviting confirmation", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      selectedRestaurant: {
+        name: "Mission Thai",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: ["vegetarian"],
+      },
+    };
+    const { store } = createStore({
+      jobs: [job({ kind: "cart_build" })],
+      session,
+    });
+    const sent: unknown[] = [];
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run in the cart_build job");
+      },
+      buildCart: async () => ({
+        sessionId: "browser_cart_123",
+        output: {
+          restaurantName: "Mission Thai",
+          items: [],
+          screenshots: [],
+          status: "blocked",
+          blockers: ["Task stopped before checkout"],
+        },
+        raw: {} as never,
+      }),
+    };
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await processFoodrunJobs(1, { store, browser, notifier });
+
+    expect(sent[0]).toMatchObject({
+      body: [
+        "I could not build a checkout-ready cart at Mission Thai.",
+        "Blocked by: Task stopped before checkout",
+        "Reply 'retry cart' to try again, or send a different restaurant or preference.",
+      ].join("\n"),
     });
   });
 
@@ -367,7 +416,7 @@ describe("processFoodrunJobs", () => {
         throw new Error("searchRestaurants should not run in the cart_edit job");
       },
       buildCart: async (criteria, _restaurant, options) => {
-        expect(options?.sessionId).toBe("browser_cart_123");
+        expect(options?.sessionId).toBeUndefined();
         expect(criteria.preferences).toContain(
           "Current cart before changes: Mission Thai, items: 2x Pad Thai $16.00 (no peanuts), total: $42.00",
         );

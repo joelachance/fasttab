@@ -294,4 +294,37 @@ describe("text intake", () => {
       kind: "cart_build",
     });
   });
+
+  test("does not confirm a blocked cart", async () => {
+    const { store, calls } = createFakeStore("confirming_cart", {
+      cart: {
+        restaurantName: "Thai Basil Cart",
+        items: [],
+        screenshots: [],
+        status: "blocked",
+        blockers: ["Task stopped before checkout"],
+      },
+    });
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "confirm order",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result).toMatchObject({
+      state: "confirming_cart",
+      reply: "I can't confirm that order because the cart is blocked. Reply 'retry cart' or send a cart change.",
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "createOrderSession",
+      "upsertParticipant",
+      "appendEvent",
+    ]);
+  });
 });

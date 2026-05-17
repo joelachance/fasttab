@@ -219,7 +219,6 @@ async function buildCart(
   const criteria = buildOrderCriteria(session, participants);
   const cart = await browser.buildCart(criteria, session.selectedRestaurant, {
     ...browserOptions(options.env),
-    sessionId: session.browserUseSessionId,
   });
 
   await options.store.updateOrderSession(job.roomId, {
@@ -256,7 +255,6 @@ async function editCart(
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const cart = await browser.buildCart(criteria, session.selectedRestaurant, {
     ...browserOptions(options.env),
-    sessionId: session.browserUseSessionId,
   });
 
   await options.store.updateOrderSession(job.roomId, {
@@ -474,10 +472,14 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
     .join(", ");
 
   return [
-    `I built a FastTab draft cart at ${restaurant.name}.${totalLine}`,
+    cart.status === "blocked" ?
+      `I could not build a checkout-ready cart at ${restaurant.name}.${totalLine}`
+    : `I built a FastTab draft cart at ${restaurant.name}.${totalLine}`,
     items ? `Items: ${items}` : "",
     cart.blockers.length ? `Blocked by: ${cart.blockers.join(", ")}` : "",
-    "Reply with changes, or reply 'confirm order' to continue.",
+    cart.status === "blocked" ?
+      "Reply 'retry cart' to try again, or send a different restaurant or preference."
+    : "Reply with changes, or reply 'confirm order' to continue.",
   ]
     .filter(Boolean)
     .join("\n");

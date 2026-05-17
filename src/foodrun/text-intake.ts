@@ -113,6 +113,14 @@ export async function handleFoodrunTextMessage(
   }
 
   if (isOrderConfirmation(input.body, session.state)) {
+    if (cartStatus(session.cart) === "blocked") {
+      return {
+        reply: "I can't confirm that order because the cart is blocked. Reply 'retry cart' or send a cart change.",
+        state: session.state,
+        extracted,
+      };
+    }
+
     await store.updateOrderSession(input.roomId, { state: "issuing_card" });
     await store.enqueueJob({
       roomId: input.roomId,
@@ -300,6 +308,12 @@ function isRetryCart(text: string): boolean {
 
 function canRetryCart(session: { selectedRestaurant?: unknown; cart?: unknown }, text: string): boolean {
   return Boolean(session.selectedRestaurant && !session.cart && isRetryCart(text));
+}
+
+function cartStatus(cart: unknown): string | undefined {
+  return cart && typeof cart === "object" && "status" in cart ?
+      String((cart as { status?: unknown }).status)
+    : undefined;
 }
 
 function isBusy(state: string): boolean {
