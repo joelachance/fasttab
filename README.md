@@ -5,6 +5,7 @@ TypeScript starter for wiring Fasttab to AgentPhone with a local webhook server 
 ## What is here
 
 - `src/modules/agent-mail/` sends demo confirmation emails through the AgentMail SDK.
+- `src/modules/sponge/` issues food-order virtual cards through the Sponge SDK.
 
 ## Installation
 

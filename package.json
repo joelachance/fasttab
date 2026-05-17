@@ -4,15 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "browser:prompt": "bun run scripts/browser-use-prompt.ts",
+    "browser:session": "bun run scripts/browser-use-session.ts",
     "build": "tsc --noEmit",
     "dev:webhook": "node --env-file=.env.local --import tsx src/server.ts",
     "setup:agentphone": "node --env-file=.env.local --import tsx src/provision.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@paysponge/sdk": "^0.1.94",
     "agentmail": "^0.5.2",
     "agentphone": "1.0.10",
-    "dotenv": "^17.4.2"
+    "browser-use-sdk": "^3.5.0",
+    "dotenv": "^17.4.2",
+    "stripe": "^22.1.1",
+    "zod": "4"
   },
   "devDependencies": {
     "@types/node": "25.8.0",
