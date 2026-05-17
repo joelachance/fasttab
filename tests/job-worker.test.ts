@@ -197,6 +197,41 @@ describe("processFoodrunJobs", () => {
     });
   });
 
+  test("skips stale restaurant search when a restaurant is already selected", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      selectedRestaurant: {
+        name: "Mission Thai",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: [],
+      },
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "restaurant_search" })],
+      session,
+    });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("stale search should not run Browser Use again");
+      },
+      buildCart: async () => {
+        throw new Error("stale search should only enqueue cart_build");
+      },
+    };
+
+    await processFoodrunJobs(1, { store, browser, notifier: null });
+
+    expect(calls.find((call) => call.method === "enqueueJob")?.input).toMatchObject({
+      roomId: "room_123",
+      kind: "cart_build",
+    });
+    expect(calls.find((call) => call.method === "appendEvent")?.input).toMatchObject({
+      eventType: "stale_restaurant_search_skipped",
+    });
+  });
+
   test("edits a cart from stored cart context and Browser Use session", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,

@@ -154,6 +154,23 @@ async function searchRestaurants(
   options: ProcessFoodrunJobsOptions & { store: FoodrunJobStore },
 ): Promise<void> {
   const session = await getSession(options.store, job.roomId);
+
+  if (session.selectedRestaurant || session.cart) {
+    if (!session.cart && session.state === "building_cart") {
+      await options.store.enqueueJob({
+        roomId: job.roomId,
+        kind: "cart_build",
+        payload: job.payload,
+      });
+    }
+    await options.store.appendEvent({
+      roomId: job.roomId,
+      eventType: "stale_restaurant_search_skipped",
+      payload: { state: session.state },
+    });
+    return;
+  }
+
   const participants = await options.store.listParticipants(job.roomId);
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const criteria = buildOrderCriteria(session, participants);
