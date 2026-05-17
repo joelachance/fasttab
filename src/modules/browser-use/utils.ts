@@ -133,7 +133,7 @@ export function buildCartPromptFromRestaurant(input: {
   return `
 Build a takeout cart from this selected restaurant. Do not place the order. Do not enter payment information. Stop before payment and report blockers.
 Before choosing items, immediately check whether online ordering is currently available. If the page says "currently not accepting orders", is closed, has unavailable pickup/delivery, or disables add-to-cart, try another direct ordering restaurant first.
-Prefer Toast ordering pages first. If the URL is DoorDash, Uber Eats, Grubhub, unavailable, or cannot build a guest cart, search for Toast, Square, ChowNow, BentoBox, Shopify, or the official restaurant ordering page. If that still cannot build a guest cart, try a comparable nearby restaurant.
+Prefer Toast ordering pages first when the restaurant has direct ordering. For Insomnia Cookies and similar brands, use Grubhub or DoorDash. If direct ordering is unavailable or cannot build a guest cart, try Grubhub and DoorDash before giving up.
 
 Original request:
 ${input.originalRequest}

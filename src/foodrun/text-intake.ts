@@ -141,7 +141,18 @@ export async function handleFoodrunTextMessage(
     };
   }
 
-  if (isOrderConfirmation(input.body, session.state)) {
+  if (hasConfirmableCart(session) && !isOrderConfirmation(input.body, session)) {
+    await store.updateOrderSession(input.roomId, { state: "confirming_cart" });
+
+    return {
+      reply:
+        "Reply 'confirm order' to approve this cart, 'no' to try another restaurant, or send changes.",
+      state: "confirming_cart",
+      extracted,
+    };
+  }
+
+  if (isOrderConfirmation(input.body, session)) {
     if (cartStatus(session.cart) === "blocked") {
       return {
         reply:
@@ -165,7 +176,7 @@ export async function handleFoodrunTextMessage(
     };
   }
 
-  if (isYes(input.body)) {
+  if (isYes(input.body) && session.state === "confirming_preferences" && !hasConfirmableCart(session)) {
     await store.updateOrderSession(input.roomId, { state: "searching_restaurants" });
     await store.enqueueJob({
       roomId: input.roomId,
@@ -404,11 +415,27 @@ function isCartEdit(text: string, state: string): boolean {
   );
 }
 
-function isOrderConfirmation(text: string, state: string): boolean {
-  return (
-    ["confirming_cart", "editing_cart"].includes(state) &&
-    /^(confirm|confirm order|place order|checkout|pay)$/i.test(text.trim())
-  );
+function hasConfirmableCart(session: { cart?: unknown }): boolean {
+  const status = cartStatus(session.cart);
+
+  return status === "draft" || status === "checkout_ready";
+}
+
+function isOrderConfirmation(
+  text: string,
+  session: { state: string; cart?: unknown },
+): boolean {
+  const matchesText = /^(confirm|confirm order|place order|checkout|pay)$/i.test(text.trim());
+
+  if (!matchesText) {
+    return false;
+  }
+
+  if (["confirming_cart", "editing_cart"].includes(session.state)) {
+    return true;
+  }
+
+  return hasConfirmableCart(session);
 }
 
 function jobPayload(

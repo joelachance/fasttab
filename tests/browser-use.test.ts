@@ -5,6 +5,7 @@ import type { MessageResponse, SessionResult } from "browser-use-sdk/v3";
 import {
   BrowserPromptOutputSchema,
   BrowserUseModule,
+  buildCartWithOrderingProviders,
   buildRestaurantAvailabilityPrompt,
   buildCartPrompt,
   buildRestaurantSearchPrompt,
@@ -38,7 +39,7 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("structured JSON");
     expect(prompt).toContain("Do not place an order");
     expect(prompt).toContain("Prefer Toast first");
-    expect(prompt).toContain("Avoid DoorDash");
+    expect(prompt).toContain("Grubhub and DoorDash are acceptable");
     expect(prompt).toContain("First run an availability scan");
     expect(prompt).toContain("currently accepting online orders");
     expect(prompt).toContain("Check at least 3 direct-ordering candidates");
@@ -57,10 +58,11 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("stop before payment");
     expect(prompt).toContain("https://example.com/order");
     expect(prompt).toContain("Return raw JSON only");
-    expect(prompt).toContain("Try only the restaurant listed below");
+    expect(prompt).toContain("Stay on Basil Cafe Thai Cuisine");
+    expect(prompt).toContain("Toast Tab");
     expect(prompt).toContain("Immediately check whether this restaurant is open");
     expect(prompt).toContain("at least one item can be added to a cart");
-    expect(prompt).toContain("Spend at most about 60 seconds");
+    expect(prompt).toContain("Spend up to about 60 seconds");
     expect(prompt).toContain('"status": "blocked"');
     expect(prompt).toContain("internal draft cart from visible menu items is acceptable");
     expect(prompt).toContain('"status": "draft"');
@@ -169,10 +171,79 @@ describe("Browser Use module", () => {
     expect(messages).toEqual(["Clicked checkout"]);
   });
 
+  test("buildCartPrompt discovery mode searches alternate direct providers", () => {
+    const prompt = buildCartPrompt(criteria, restaurant, { discoverProviders: true });
+
+    expect(prompt).toContain("Search the web for this restaurant's direct ordering page");
+    expect(prompt).toContain("Prefer Toast Tab first");
+    expect(prompt).toContain("try Grubhub and DoorDash");
+  });
+
+  test("buildCartPrompt marketplace mode targets grubhub and doordash", () => {
+    const prompt = buildCartPrompt(
+      { ...criteria, preferences: ["Insomnia Cookies"] },
+      {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "Cookie delivery",
+        dietaryFit: [],
+      },
+      { useMarketplace: true },
+    );
+
+    expect(prompt).toContain("Grubhub and DoorDash");
+    expect(prompt).toContain("Prefer Grubhub first");
+  });
+
+  test("buildCartWithOrderingProviders retries discovery after blocked provider", async () => {
+    const calls: string[] = [];
+    const browser = {
+      runTask: async (task: string) => {
+        calls.push(task);
+
+        if (calls.length === 1) {
+          return {
+            id: "session_blocked",
+            output: {
+              restaurantName: restaurant.name,
+              items: [],
+              screenshots: [],
+              status: "blocked",
+              blockers: ['Unexpected token "S", "[Session co"... is not valid JSON'],
+            },
+          };
+        }
+
+        return {
+          id: "session_ready",
+          output: {
+            restaurantName: restaurant.name,
+            checkoutUrl: "https://www.toasttab.com/basil-cafe/cart",
+            items: [{ name: "Pad Thai", quantity: 1, priceUsd: 15.5 }],
+            screenshots: [],
+            status: "checkout_ready",
+            blockers: [],
+          },
+        };
+      },
+    };
+
+    const result = await buildCartWithOrderingProviders(browser, criteria, {
+      ...restaurant,
+      orderingUrl: "https://senseofthaiashburn.blizzfull.com/menu",
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("https://senseofthaiashburn.blizzfull.com/menu");
+    expect(calls[1]).toContain("Search the web for this restaurant's direct ordering page");
+    expect(result.output.status).toBe("checkout_ready");
+    expect(result.output.items).toHaveLength(1);
+  });
+
   test("runCartTaskWithBlockedFallback converts stopped prose into blocked cart JSON", async () => {
     const browser = {
       runTask: async () => {
-        throw new SyntaxError('Unexpected token "T", "Task stopp"... is not valid JSON');
+        throw new SyntaxError('Unexpected token "S", "[Session co"... is not valid JSON');
       },
     };
 
@@ -186,8 +257,14 @@ describe("Browser Use module", () => {
         restaurantName: "Basil Cafe Thai Cuisine",
         items: [],
         status: "blocked",
-        blockers: ['Unexpected token "T", "Task stopp"... is not valid JSON'],
+        blockers: ['Unexpected token "S", "[Session co"... is not valid JSON'],
       },
     });
+  });
+
+  test("parseBrowserUseJson surfaces session errors clearly", () => {
+    expect(() =>
+      parseBrowserUseJson("[Session connection lost before cart JSON]", BrowserPromptOutputSchema),
+    ).toThrow("Browser Use session did not return cart JSON");
   });
 });

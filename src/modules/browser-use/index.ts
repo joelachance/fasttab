@@ -10,6 +10,12 @@ import { z } from "zod";
 
 import { envWithDefault, requiredEnv, type Env } from "../../env.js";
 import type { CartSummary, Money, OrderCriteria, RestaurantOption } from "../../types.js";
+import {
+  buildOrderingUrlAttempts,
+  prefersMarketplaceOrdering,
+  shouldDiscoverOrderingProviders,
+  shouldTryMarketplaceOrdering,
+} from "./ordering-urls.js";
 
 export const BrowserRestaurantOptionSchema = z.object({
   name: z.string().min(1),
@@ -187,12 +193,7 @@ export class BrowserUseModule {
     restaurant: RestaurantOption,
     options?: BrowserUseRunOptions,
   ): Promise<BrowserUseRunResult<CartBuildOutput>> {
-    const result = await runCartTaskWithBlockedFallback(
-      this,
-      criteria,
-      restaurant,
-      options,
-    );
+    const result = await buildCartWithOrderingProviders(this, criteria, restaurant, options);
 
     return {
       ...result,
@@ -205,14 +206,127 @@ export class BrowserUseModule {
   }
 }
 
-export async function runCartTaskWithBlockedFallback(
+export type BuildCartPromptOptions = {
+  orderingUrl?: string;
+  discoverProviders?: boolean;
+  useMarketplace?: boolean;
+};
+
+export async function buildCartWithOrderingProviders(
   browser: Pick<BrowserUseModule, "runTask">,
   criteria: OrderCriteria,
   restaurant: RestaurantOption,
   options?: BrowserUseRunOptions,
 ): Promise<BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>>> {
+  const urlAttempts = buildOrderingUrlAttempts(restaurant);
+  const blockers: string[] = [];
+  let lastResult: BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>> | undefined;
+
+  if (prefersMarketplaceOrdering(criteria, restaurant)) {
+    const marketplace = await runCartTaskWithBlockedFallback(
+      browser,
+      criteria,
+      restaurant,
+      options,
+      { useMarketplace: true },
+    );
+    lastResult = marketplace;
+
+    if (isUsefulCartResult(marketplace.output)) {
+      return marketplace;
+    }
+
+    blockers.push(...marketplace.output.blockers);
+  }
+
+  for (const orderingUrl of urlAttempts) {
+    if (prefersMarketplaceOrdering(criteria, restaurant)) {
+      break;
+    }
+    const result = await runCartTaskWithBlockedFallback(
+      browser,
+      criteria,
+      restaurant,
+      options,
+      { orderingUrl, discoverProviders: false },
+    );
+    lastResult = result;
+
+    if (isUsefulCartResult(result.output)) {
+      return result;
+    }
+
+    blockers.push(...result.output.blockers);
+  }
+
+  if (
+    !prefersMarketplaceOrdering(criteria, restaurant) &&
+    (shouldDiscoverOrderingProviders(restaurant) || !isUsefulCartResult(lastResult?.output))
+  ) {
+    const discovery = await runCartTaskWithBlockedFallback(
+      browser,
+      criteria,
+      restaurant,
+      options,
+      { discoverProviders: true },
+    );
+    lastResult = discovery;
+
+    if (isUsefulCartResult(discovery.output)) {
+      return discovery;
+    }
+
+    blockers.push(...discovery.output.blockers);
+  }
+
+  if (shouldTryMarketplaceOrdering(criteria, restaurant) || !isUsefulCartResult(lastResult?.output)) {
+    const marketplace = await runCartTaskWithBlockedFallback(
+      browser,
+      criteria,
+      restaurant,
+      options,
+      { useMarketplace: true },
+    );
+    lastResult = marketplace;
+
+    if (isUsefulCartResult(marketplace.output)) {
+      return marketplace;
+    }
+
+    blockers.push(...marketplace.output.blockers);
+  }
+
+  return (
+    lastResult ?? {
+      sessionId: options?.sessionId ?? "browser_use_blocked",
+      output: {
+        restaurantName: restaurant.name,
+        items: [],
+        screenshots: [],
+        status: "blocked",
+        blockers: uniqueStrings(blockers),
+      },
+      raw: {
+        id: options?.sessionId ?? "browser_use_blocked",
+        output: uniqueStrings(blockers).join("; "),
+      } as unknown as SessionResult<z.output<typeof CartBuildOutputSchema>>,
+    }
+  );
+}
+
+export async function runCartTaskWithBlockedFallback(
+  browser: Pick<BrowserUseModule, "runTask">,
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  options?: BrowserUseRunOptions,
+  promptOptions: BuildCartPromptOptions = {},
+): Promise<BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>>> {
   try {
-    return await browser.runTask(buildCartPrompt(criteria, restaurant), CartBuildOutputSchema, options);
+    return await browser.runTask(
+      buildCartPrompt(criteria, restaurant, promptOptions),
+      CartBuildOutputSchema,
+      options,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -259,7 +373,8 @@ Cartability requirements:
 - First run an availability scan. Check hours/open status and online-order availability before evaluating menu fit.
 - Prefer restaurants with direct online ordering that lets a guest add items and view a cart before login or payment.
 - Prefer Toast first, then Square, ChowNow, BentoBox, Shopify, or an official restaurant ordering page.
-- Avoid DoorDash, Uber Eats, Grubhub, and other marketplaces unless no direct ordering option exists.
+- For delivery-only chains such as Insomnia Cookies, or when no direct ordering page exists, Grubhub and DoorDash are acceptable ordering sources.
+- Use Uber Eats only if neither direct ordering nor Grubhub/DoorDash can satisfy the request.
 - Check the ordering page immediately for "currently not accepting orders", "closed", unavailable pickup, or disabled add-to-cart controls.
 - Do not return restaurants that are not currently accepting online orders for the requested pickup/delivery mode.
 - Spend no more than about 30 seconds on any single restaurant before moving to another candidate.
@@ -316,6 +431,7 @@ You are given API-shortlisted restaurant candidates. Browser-use should verify t
 Availability scan:
 - For each candidate, immediately check current hours/open status and whether online ordering is currently accepting pickup/delivery orders.
 - Prefer direct ordering pages, especially Toast, Square, ChowNow, BentoBox, Shopify, or official restaurant ordering pages.
+- For Insomnia Cookies and similar delivery-only brands, verify Grubhub or DoorDash instead of requiring Toast.
 - Skip candidates that are closed, say "currently not accepting orders", have unavailable pickup/delivery, require login before cart, or have disabled add-to-cart controls.
 - Spend no more than about 30 seconds on a single candidate before moving on.
 - Return the first candidate that is currently open, accepting online orders, and likely cartable as the first restaurant.
@@ -355,18 +471,56 @@ Return JSON shaped like:
 export function buildCartPrompt(
   criteria: OrderCriteria,
   restaurant: RestaurantOption,
+  promptOptions: BuildCartPromptOptions = {},
 ): string {
   const location = criteria.location.placeName ?? criteria.location.raw;
+  const orderingUrl =
+    promptOptions.orderingUrl ?? restaurant.orderingUrl ?? restaurant.url ?? "not provided";
+  const providerStrategy =
+    promptOptions.useMarketplace ?
+      `
+Ordering provider strategy:
+- Stay on ${restaurant.name}. Do not switch to a different restaurant.
+- This restaurant likely orders through Grubhub or DoorDash rather than Toast. Search Grubhub and DoorDash for the correct store near the delivery location.
+- Prefer Grubhub first, then DoorDash, then Uber Eats only if needed.
+- Build a guest-visible cart with real menu items and prices when the marketplace allows browsing without payment.
+- If the marketplace requires login before showing a cart, return a draft cart from visible menu prices and note the login blocker.
+- Spend up to about 90 seconds across marketplace attempts before returning blocked JSON.
+`
+    : promptOptions.discoverProviders ?
+      `
+Ordering provider strategy:
+- Stay on ${restaurant.name}. Do not switch to a different restaurant.
+- Search the web for this restaurant's direct ordering page. Prefer Toast Tab first, then Square Online, ChowNow, BentoBox, Shopify, or the official restaurant order page.
+- If no direct ordering page works, try Grubhub and DoorDash for this same restaurant before returning blocked JSON.
+- Open the best ordering page you find and build the cart there.
+- Spend up to about 90 seconds across provider attempts before returning blocked JSON.
+`
+    : prefersMarketplaceOrdering(criteria, restaurant) ?
+      `
+Ordering provider strategy:
+- Stay on ${restaurant.name}. Do not switch to a different restaurant.
+- This request targets a delivery-marketplace brand. Start on Grubhub or DoorDash for this restaurant near the order location.
+- Prefer Grubhub first, then DoorDash.
+- Build a guest-visible cart when possible; otherwise return a draft cart from visible menu items.
+`
+    : `
+Ordering provider strategy:
+- Stay on ${restaurant.name}. Do not switch to a different restaurant.
+- Start at the ordering URL below. If that page is a white-label host, broken, or cannot build a guest cart, search for Toast Tab, Square, ChowNow, BentoBox, Shopify, or the official order page.
+- If direct ordering still fails, try Grubhub and DoorDash for this same restaurant.
+- Prefer Toast Tab first when multiple direct ordering providers exist.
+- Spend up to about 60 seconds on the starting URL, then up to about 30 more seconds on alternate providers if needed.
+`;
 
   return `
 Build a takeout cart for the group and stop before payment. Return raw JSON only.
 
 Safety rails:
 - Do not place the order. Do not enter payment information.
-- Try only the restaurant listed below. Do not search for or switch to a comparable nearby restaurant.
+${providerStrategy}
 - Immediately check whether this restaurant is open and online ordering is currently accepting ${criteria.pickupOrDelivery} orders.
 - Confirm that at least one item can be added to a cart as a guest before using "status": "checkout_ready".
-- Spend at most about 60 seconds trying this restaurant's ordering URL. If it is closed, not accepting orders, requires login before cart, or has disabled add-to-cart controls, return JSON with "status": "blocked" and clear blockers.
 - Prefer a real website cart when possible, but an internal draft cart from visible menu items is acceptable if the site blocks checkout after you verify menu/cartability.
 - If checkout requires login, payment, unavailable items, or another site blocker after items are visible, still build a draft cart from visible menu items before reporting the blocker.
 - Use "status": "draft" when you found plausible menu items at this restaurant but could not make a checkout-ready website cart.
@@ -377,7 +531,7 @@ Safety rails:
 
 Restaurant:
 - Name: ${restaurant.name}
-- Ordering URL: ${restaurant.orderingUrl ?? restaurant.url ?? "not provided"}
+- Ordering URL: ${orderingUrl}
 
 Order context:
 - Location: ${location}
@@ -413,10 +567,24 @@ export function parseBrowserUseJson<T extends z.ZodType>(
   output: unknown,
   schema: T,
 ): z.output<T> {
-  const parsed =
-    typeof output === "string" ? JSON.parse(stripJsonFence(output))
-    : typeof output === "object" && output !== null ? output
-    : undefined;
+  let parsed: unknown;
+
+  if (typeof output === "string") {
+    const trimmed = stripJsonFence(output);
+
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        trimmed.startsWith("[Session") ?
+          `Browser Use session did not return cart JSON: ${trimmed}`
+        : `Browser Use returned invalid JSON: ${message}`,
+      );
+    }
+  } else if (typeof output === "object" && output !== null) {
+    parsed = output;
+  }
 
   if (parsed === undefined) {
     throw new Error("Browser Use output must be a JSON string or object");
@@ -426,7 +594,27 @@ export function parseBrowserUseJson<T extends z.ZodType>(
 }
 
 function looksLikeStoppedTask(message: string): boolean {
-  return /Task stopp|not valid JSON/i.test(message);
+  return /Task stopp|not valid JSON|invalid JSON|session did not return cart JSON|\[Session/i.test(
+    message,
+  );
+}
+
+function isUsefulCartResult(
+  output: z.output<typeof CartBuildOutputSchema> | undefined,
+): boolean {
+  if (!output) {
+    return false;
+  }
+
+  if (output.status === "checkout_ready") {
+    return true;
+  }
+
+  return output.items.length > 0;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return values.filter((value, index, all) => value && all.indexOf(value) === index);
 }
 
 function normalizeRestaurantSearch(

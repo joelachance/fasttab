@@ -154,7 +154,9 @@ describe("text intake", () => {
   });
 
   test("enqueues restaurant search when the user confirms", async () => {
-    const { store, calls } = createFakeStore();
+    const { store, calls } = createFakeStore("confirming_preferences", {
+      confirmedPreferences: { cuisines: ["Thai"] },
+    });
 
     const result = await handleFoodrunTextMessage(
       {
@@ -214,6 +216,35 @@ describe("text intake", () => {
       "upsertParticipant",
       "appendEvent",
     ]);
+  });
+
+  test("accepts confirm order when a cart exists but state drifted", async () => {
+    const { store, calls } = createFakeStore("confirming_preferences", {
+      cart: {
+        restaurantName: "Sense of Thai",
+        items: [{ name: "Green curry with tofu", quantity: 1 }],
+        screenshots: [],
+        status: "draft",
+        blockers: [],
+      },
+    });
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "confirm order",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result).toMatchObject({
+      state: "issuing_card",
+      reply: "Status: preparing checkout. Test mode will not place a real order.",
+    });
+    expect(calls.map((call) => call.method)).toContain("enqueueJob");
   });
 
   test("requires explicit order confirmation once the cart is ready", async () => {
