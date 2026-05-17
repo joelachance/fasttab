@@ -236,11 +236,14 @@ export function buildCartPrompt(
   const location = criteria.location.placeName ?? criteria.location.raw;
 
   return `
-Build a takeout cart for the group and stop before payment.
+Build a takeout cart for the group and stop before payment. Return raw JSON only.
 
 Safety rails:
 - Do not place the order. Do not enter payment information.
-- If checkout requires login or payment, stop and report the blocker.
+- If checkout requires login, payment, unavailable items, or any site blocker, stop and report the blocker in the JSON object.
+- If you cannot complete the cart for any reason, still return the JSON object with "status": "blocked", any items you found, and blockers explaining what happened.
+- Do not answer with prose, markdown, comments, or a "Task stopped" sentence.
+- Your final response must be parseable JSON matching the shape below.
 
 Restaurant:
 - Name: ${restaurant.name}
@@ -251,6 +254,13 @@ Order context:
 - Participants: ${criteria.participantCount}
 - Preferences: ${formatList(criteria.preferences)}
 - Allergies: ${formatList(criteria.allergies)}
+
+Output rules:
+- Return exactly one JSON object and nothing else.
+- Use "status": "checkout_ready" only when the cart is built and ready for user confirmation.
+- Use "status": "draft" when you have a partial cart but it is not checkout-ready.
+- Use "status": "blocked" when login, payment, unavailable menu access, or another blocker prevents cart completion.
+- In blocked cases, "items" may be empty, but "blockers" must explain the blocker.
 
 Return JSON shaped like:
 {
