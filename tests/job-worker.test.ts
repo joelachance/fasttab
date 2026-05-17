@@ -252,6 +252,50 @@ describe("processFoodrunJobs", () => {
     });
   });
 
+  test("builds a cart using selected restaurant address when preferences were reset", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      confirmedPreferences: {},
+      selectedRestaurant: {
+        name: "Mission Thai",
+        address: "60 Morris St, San Francisco, CA 94107",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: ["vegetarian"],
+      },
+    };
+    const { store } = createStore({
+      jobs: [job({ kind: "cart_build" })],
+      session,
+    });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run in the cart_build job");
+      },
+      buildCart: async (criteria) => {
+        expect(criteria.location.raw).toBe("60 Morris St, San Francisco, CA 94107");
+
+        return {
+          sessionId: "browser_cart_123",
+          output: {
+            restaurantName: "Mission Thai",
+            items: [{ name: "Green Curry", quantity: 1 }],
+            estimatedTotal: { currency: "usd", cents: 1695 },
+            screenshots: [],
+            status: "checkout_ready",
+            blockers: [],
+          },
+          raw: {} as never,
+        };
+      },
+    };
+
+    await expect(
+      processFoodrunJobs(1, { store, browser, notifier: null }),
+    ).resolves.toMatchObject({ processed: 1 });
+  });
+
   test("skips stale restaurant search when a restaurant is already selected", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,

@@ -410,7 +410,9 @@ function buildOrderCriteria(
   }
 
   const location =
-    session.confirmedPreferences.address ?? session.confirmedPreferences.location;
+    session.confirmedPreferences.address ??
+    session.confirmedPreferences.location ??
+    session.selectedRestaurant?.address;
 
   if (!location) {
     throw new Error("Search requires a location or address");
