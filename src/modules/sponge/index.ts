@@ -1,4 +1,4 @@
-import { SpongeWallet } from "@paysponge/sdk";
+import { SpongePlatform, SpongeWallet } from "@paysponge/sdk";
 
 import { envWithDefault, requiredEnv, type Env } from "../../env.js";
 
@@ -58,6 +58,7 @@ type IssueVirtualCardRequest = {
 };
 
 type SpongeWalletLike = {
+  getAddresses?(): Promise<Record<string, string>>;
   issueVirtualCard(request: IssueVirtualCardRequest): Promise<unknown>;
 };
 
@@ -66,6 +67,24 @@ type SpongeWalletConnector = (options: {
   baseUrl: string;
   noBrowser: true;
 }) => Promise<SpongeWalletLike>;
+
+type SpongePlatformLike = {
+  createAgent(options: {
+    name: string;
+    description?: string;
+    dailySpendingLimit?: string;
+    weeklySpendingLimit?: string;
+    monthlySpendingLimit?: string;
+    isTestMode?: boolean;
+  }): Promise<{ agent: { id: string }; apiKey: string }>;
+  getAgentApiKey(agentId: string, isTestMode?: boolean): Promise<string | null>;
+  connectAgent(options: { apiKey: string; agentId?: string }): Promise<SpongeWalletLike>;
+};
+
+type SpongePlatformConnector = (options: {
+  apiKey: string;
+  baseUrl: string;
+}) => Promise<SpongePlatformLike>;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -135,16 +154,23 @@ export class SpongeModule {
     env: Env = process.env,
     wallet?: SpongeWalletLike,
     connect: SpongeWalletConnector = SpongeWallet.connect,
+    connectPlatform: SpongePlatformConnector = SpongePlatform.connect,
   ) {
     this.defaultAmountUsd = envWithDefault(env, "SPONGE_FOOD_ORDER_CARD_AMOUNT_USD", "75");
     this.wallet =
       wallet ?
         Promise.resolve(wallet)
-      : connect({
-          apiKey: requiredEnv(env, "SPONGE_API_KEY"),
-          baseUrl: envWithDefault(env, "SPONGE_API_BASE", "https://api.wallet.paysponge.com"),
-          noBrowser: true,
-        });
+      : createSpongeWallet(env, connect, connectPlatform);
+  }
+
+  async getAddresses(): Promise<Record<string, string>> {
+    const wallet = await this.wallet;
+
+    if (!wallet.getAddresses) {
+      throw new Error("Sponge wallet does not support getAddresses");
+    }
+
+    return wallet.getAddresses();
   }
 
   async issueFoodOrderCard(input: IssueFoodOrderCardInput): Promise<FoodOrderCard> {
@@ -172,4 +198,45 @@ export class SpongeModule {
 
     return normalizeFoodOrderCard(card);
   }
+}
+
+async function createSpongeWallet(
+  env: Env,
+  connect: SpongeWalletConnector,
+  connectPlatform: SpongePlatformConnector,
+): Promise<SpongeWalletLike> {
+  const baseUrl = envWithDefault(env, "SPONGE_API_BASE", "https://api.wallet.paysponge.com");
+  const apiKey = requiredEnv(env, "SPONGE_API_KEY");
+
+  if (!apiKey.startsWith("sponge_master")) {
+    return connect({ apiKey, baseUrl, noBrowser: true });
+  }
+
+  const platform = await connectPlatform({ apiKey, baseUrl });
+  const agentId = env.SPONGE_AGENT_ID;
+  const agentKey =
+    agentId ? await platform.getAgentApiKey(agentId, true)
+    : await createPlatformAgent(platform, env);
+
+  if (!agentKey) {
+    throw new Error("Sponge platform did not return an agent API key");
+  }
+
+  return platform.connectAgent({ apiKey: agentKey, agentId });
+}
+
+async function createPlatformAgent(
+  platform: SpongePlatformLike,
+  env: Env,
+): Promise<string> {
+  const created = await platform.createAgent({
+    name: envWithDefault(env, "SPONGE_AGENT_NAME", "Fasttab Foodrun Agent"),
+    description: "Fasttab food-order checkout agent",
+    dailySpendingLimit: env.SPONGE_DAILY_SPENDING_LIMIT_USD,
+    weeklySpendingLimit: env.SPONGE_WEEKLY_SPENDING_LIMIT_USD,
+    monthlySpendingLimit: env.SPONGE_MONTHLY_SPENDING_LIMIT_USD,
+    isTestMode: true,
+  });
+
+  return created.apiKey;
 }

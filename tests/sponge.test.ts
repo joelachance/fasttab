@@ -14,7 +14,7 @@ type IssueVirtualCardRequest = {
 function fakeWallet(
   issueVirtualCard: (request: IssueVirtualCardRequest) => Promise<unknown>,
 ) {
-  return { issueVirtualCard };
+  return { getAddresses: async () => ({ base: "0x123" }), issueVirtualCard };
 }
 
 describe("SpongeModule", () => {
@@ -111,5 +111,48 @@ describe("SpongeModule", () => {
         noBrowser: true,
       },
     ]);
+  });
+
+  test("uses SpongePlatform when SPONGE_API_KEY is a master key", async () => {
+    const platformCalls: unknown[] = [];
+    const connectAgentCalls: unknown[] = [];
+    const module = new SpongeModule(
+      {
+        SPONGE_API_KEY: "sponge_master_123",
+        SPONGE_API_BASE: "https://api.test.paysponge.com",
+        SPONGE_AGENT_NAME: "Fasttab Test Agent",
+      },
+      undefined,
+      async () => {
+        throw new Error("SpongeWallet.connect should not be called for master keys");
+      },
+      async (options) => {
+        platformCalls.push(options);
+        return {
+          async createAgent(request) {
+            platformCalls.push(request);
+            return { agent: { id: "agent_123" }, apiKey: "sponge_test_agent_123" };
+          },
+          async getAgentApiKey() {
+            return null;
+          },
+          async connectAgent(request) {
+            connectAgentCalls.push(request);
+            return fakeWallet(async () => ({ cardId: "card_789" }));
+          },
+        };
+      },
+    );
+
+    expect(await module.getAddresses()).toEqual({ base: "0x123" });
+    expect(platformCalls[0]).toEqual({
+      apiKey: "sponge_master_123",
+      baseUrl: "https://api.test.paysponge.com",
+    });
+    expect(platformCalls[1]).toMatchObject({
+      name: "Fasttab Test Agent",
+      isTestMode: true,
+    });
+    expect(connectAgentCalls).toEqual([{ apiKey: "sponge_test_agent_123", agentId: undefined }]);
   });
 });
