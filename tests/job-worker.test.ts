@@ -228,6 +228,78 @@ describe("processFoodrunJobs", () => {
     });
   });
 
+  test("skips browser restaurant search for insomnia and queues marketplace cart build", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "searching_restaurants",
+      confirmedPreferences: {
+        cuisines: ["Insomnia Cookies"],
+        location: "Mission, San Francisco",
+        pickupOrDelivery: "delivery",
+      },
+    };
+    const { store, calls } = createStore({ jobs: [job()], session });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run for insomnia");
+      },
+      buildCart: async () => {
+        throw new Error("buildCart should not run in this test");
+      },
+    };
+    const sent: unknown[] = [];
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await expect(processFoodrunJobs(1, { store, browser, notifier })).resolves.toMatchObject({
+      processed: 1,
+    });
+    expect(calls.find((call) => call.method === "enqueueJob")?.input).toMatchObject({
+      kind: "cart_build",
+    });
+    expect(sent[0]).toMatchObject({
+      body: "Status: building cart. I found Insomnia Cookies. I'm checking Grubhub and DoorDash for a delivery cart now.",
+    });
+  });
+
+  test("notifies requester when restaurant search is missing a delivery area", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      confirmedPreferences: {
+        cuisines: ["Cookies"],
+      },
+    };
+    const { store, calls } = createStore({ jobs: [job()], session });
+    const sent: unknown[] = [];
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("buildCart should not run");
+      },
+      buildCart: async () => {
+        throw new Error("buildCart should not run");
+      },
+    };
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await expect(processFoodrunJobs(1, { store, browser, notifier })).resolves.toMatchObject({
+      processed: 1,
+    });
+    expect(sent[0]).toMatchObject({
+      body: [
+        "Status: need a delivery area.",
+        "I know what you want to order, but I still need an address or neighborhood before I can check Insomnia, Grubhub, or DoorDash.",
+        "Example: Insomnia Cookies delivery to 506 20th St, San Francisco.",
+      ].join("\n"),
+    });
+  });
+
   test("notifies requester when restaurant availability search times out", async () => {
     const { store, calls } = createStore({ jobs: [job()] });
     const sent: unknown[] = [];

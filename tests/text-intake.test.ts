@@ -82,6 +82,12 @@ describe("text intake", () => {
     });
   });
 
+  test("asks for a delivery area in the confirmation reply when location is missing", () => {
+    expect(formatPreferenceConfirmation({ cuisines: ["Insomnia Cookies"] })).toContain(
+      "Send a delivery address",
+    );
+  });
+
   test("formats the FastTab confirmation reply", () => {
     expect(
       formatPreferenceConfirmation({
@@ -153,9 +159,33 @@ describe("text intake", () => {
     ]);
   });
 
+  test("asks for a delivery area before searching when location is missing", async () => {
+    const { store, calls } = createFakeStore("confirming_preferences", {
+      confirmedPreferences: { cuisines: ["Insomnia Cookies"] },
+    });
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "yes",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result.state).toBe("confirming_preferences");
+    expect(result.reply).toContain("delivery address");
+    expect(calls.map((call) => call.method)).not.toContain("enqueueJob");
+  });
+
   test("enqueues restaurant search when the user confirms", async () => {
     const { store, calls } = createFakeStore("confirming_preferences", {
-      confirmedPreferences: { cuisines: ["Thai"] },
+      confirmedPreferences: {
+        cuisines: ["Thai"],
+        location: "Mission, San Francisco",
+      },
     });
 
     const result = await handleFoodrunTextMessage(

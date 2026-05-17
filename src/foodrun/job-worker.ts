@@ -2,6 +2,7 @@ import { AgentPhoneClient } from "agentphone";
 
 import { envWithDefault, requiredEnv, type Env } from "../env.js";
 import { BrowserUseModule } from "../modules/browser-use/index.js";
+import { prefersMarketplaceOrdering } from "../modules/browser-use/ordering-urls.js";
 import { RestaurantAvailabilityModule } from "../modules/restaurant-availability.js";
 import { SpongeModule } from "../modules/sponge/index.js";
 import { StripeModule } from "../modules/stripe/index.js";
@@ -9,6 +10,7 @@ import { splitEvenly } from "../modules/split-bill/index.js";
 import type { CartSummary, OrderCriteria, RestaurantOption, SplitLineItem } from "../types.js";
 import { OrderSessionStore } from "./order-session-store.js";
 import type {
+  ConfirmedPreferences,
   FoodrunJob,
   FoodrunJobKind,
   FoodrunOrderSession,
@@ -182,6 +184,28 @@ async function searchRestaurants(
   const availabilityScanner =
     options.availabilityScanner ?? new RestaurantAvailabilityModule(options.env ?? process.env);
   const criteria = buildOrderCriteria(session, participants);
+  const marketplaceRestaurant = marketplaceRestaurantFromPreferences(session.confirmedPreferences);
+
+  if (marketplaceRestaurant && prefersMarketplaceOrdering(criteria, marketplaceRestaurant)) {
+    await options.store.updateOrderSession(job.roomId, {
+      state: "building_cart",
+      selectedRestaurant: marketplaceRestaurant,
+      browserUseSessionId: null,
+      browserUseLiveUrl: null,
+    });
+    await options.store.enqueueJob({
+      roomId: job.roomId,
+      kind: "cart_build",
+      payload: job.payload,
+    });
+    await notify(
+      job,
+      options,
+      `Status: building cart. I found ${marketplaceRestaurant.name}. I'm checking Grubhub and DoorDash for a delivery cart now.`,
+    );
+    return;
+  }
+
   const candidates = await availabilityScanner.findCandidates(criteria);
   const search =
     candidates.length > 0 && browser.verifyRestaurantCandidates ?
@@ -679,15 +703,7 @@ async function handleJobFailure(
       eventType: "browser_use_restaurant_search_failed",
       payload: { error: message, jobKind: job.kind },
     });
-    await notify(
-      job,
-      options,
-      [
-        "Status: restaurant search blocked.",
-        `I couldn't verify a currently open ${cuisine} restaurant that is accepting online orders before the browser search timed out.`,
-        "How about another open cuisine nearby, or send me a specific restaurant ordering URL?",
-      ].join("\n"),
-    );
+    await notify(job, options, formatRestaurantSearchFailureMessage(message, cuisine));
     return;
   }
 
@@ -746,4 +762,44 @@ function formatFailureReason(message: string): string {
   const trimmed = message.replace(/\s+/g, " ").trim();
 
   return trimmed.length > 160 ? `${trimmed.slice(0, 157)}...` : trimmed;
+}
+
+function formatRestaurantSearchFailureMessage(message: string, cuisine: string): string {
+  if (/location or address/i.test(message)) {
+    return [
+      "Status: need a delivery area.",
+      "I know what you want to order, but I still need an address or neighborhood before I can check Insomnia, Grubhub, or DoorDash.",
+      "Example: Insomnia Cookies delivery to 506 20th St, San Francisco.",
+    ].join("\n");
+  }
+
+  if (/timed out|did not complete within/i.test(message)) {
+    return [
+      "Status: restaurant search blocked.",
+      `I couldn't verify a currently open ${cuisine} restaurant that is accepting online orders before the browser search timed out.`,
+      "How about another open cuisine nearby, or send me a specific restaurant ordering URL?",
+    ].join("\n");
+  }
+
+  return [
+    "Status: restaurant search blocked.",
+    formatFailureReason(message),
+    "Try another cuisine, add a delivery address, or send a specific restaurant ordering URL.",
+  ].join("\n");
+}
+
+function marketplaceRestaurantFromPreferences(
+  preferences: ConfirmedPreferences,
+): RestaurantOption | null {
+  const insomnia = preferences.cuisines?.find((cuisine) => /insomnia/i.test(cuisine));
+
+  if (insomnia) {
+    return {
+      name: insomnia,
+      reason: "User requested Insomnia Cookies. FastTab will order through Grubhub or DoorDash.",
+      dietaryFit: preferences.dietary ?? [],
+    };
+  }
+
+  return null;
 }

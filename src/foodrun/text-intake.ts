@@ -53,6 +53,8 @@ export async function handleFoodrunTextMessage(
   if (!session) {
     throw new Error(`Order session missing after create: ${input.roomId}`);
   }
+
+  const preferences = mergePreferences(session.confirmedPreferences, extracted);
   await store.upsertParticipant({
     roomId: input.roomId,
     phoneNumber: input.fromNumber,
@@ -177,7 +179,18 @@ export async function handleFoodrunTextMessage(
   }
 
   if (isYes(input.body) && session.state === "confirming_preferences" && !hasConfirmableCart(session)) {
-    await store.updateOrderSession(input.roomId, { state: "searching_restaurants" });
+    if (!hasOrderLocation(preferences)) {
+      return {
+        reply: formatMissingLocationReply(preferences),
+        state: "confirming_preferences",
+        extracted: preferences,
+      };
+    }
+
+    await store.updateOrderSession(input.roomId, {
+      state: "searching_restaurants",
+      confirmedPreferences: preferences,
+    });
     await store.enqueueJob({
       roomId: input.roomId,
       kind: "restaurant_search",
@@ -187,21 +200,52 @@ export async function handleFoodrunTextMessage(
     return {
       reply: "Status: searching restaurants. I'll text you when I find a match and start the cart.",
       state: "searching_restaurants",
-      extracted,
+      extracted: preferences,
     };
   }
 
   await store.updateOrderSession(input.roomId, {
     state: "confirming_preferences",
-    confirmedPreferences: extracted,
+    confirmedPreferences: preferences,
   });
-  await rememberExtractedFacts(input, extracted, options.memory ?? createMemory(options.env));
+  await rememberExtractedFacts(input, preferences, options.memory ?? createMemory(options.env));
 
   return {
-    reply: formatPreferenceConfirmation(extracted),
+    reply: formatPreferenceConfirmation(preferences),
     state: "confirming_preferences",
-    extracted,
+    extracted: preferences,
   };
+}
+
+export function mergePreferences(
+  existing: ConfirmedPreferences,
+  incoming: ConfirmedPreferences,
+): ConfirmedPreferences {
+  return {
+    ...existing,
+    ...incoming,
+    dietary: incoming.dietary ?? existing.dietary,
+    allergies: incoming.allergies ?? existing.allergies,
+    cuisines: incoming.cuisines?.length ? incoming.cuisines : existing.cuisines,
+    address: incoming.address ?? existing.address,
+    location: incoming.location ?? existing.location,
+    budgetPerPersonCents: incoming.budgetPerPersonCents ?? existing.budgetPerPersonCents,
+    pickupOrDelivery: incoming.pickupOrDelivery ?? existing.pickupOrDelivery,
+    notes:
+      incoming.notes?.length ?
+        [...(existing.notes ?? []), ...incoming.notes].filter(
+          (note, index, notes) => notes.indexOf(note) === index,
+        )
+      : existing.notes,
+  };
+}
+
+export function hasOrderLocation(preferences: ConfirmedPreferences): boolean {
+  return Boolean(orderLocation(preferences)?.trim());
+}
+
+export function orderLocation(preferences: ConfirmedPreferences): string | undefined {
+  return preferences.address ?? preferences.location;
 }
 
 export function extractPreferenceFacts(text: string): ConfirmedPreferences {
@@ -272,11 +316,31 @@ export function formatPreferenceConfirmation(preferences: ConfirmedPreferences):
     return "Hi, this is your FastTab agent. What would you like to order?";
   }
 
+  if (!hasOrderLocation(preferences)) {
+    return [
+      "Hi, this is your FastTab agent. I have:",
+      ...facts.map((fact) => `- ${fact}`),
+      "",
+      "Send a delivery address or neighborhood, then reply yes to search.",
+      "Example: Insomnia Cookies delivery to 506 20th St, San Francisco.",
+    ].join("\n");
+  }
+
   return [
     "Hi, this is your FastTab agent. I have:",
     ...facts.map((fact) => `- ${fact}`),
     "",
     "Reply yes to search restaurants, or send changes.",
+  ].join("\n");
+}
+
+function formatMissingLocationReply(preferences: ConfirmedPreferences): string {
+  const brand = preferences.cuisines?.find((cuisine) => /insomnia/i.test(cuisine));
+  const item = brand ?? preferences.cuisines?.[0] ?? "your order";
+
+  return [
+    `I still need a delivery address or neighborhood before I can search for ${item}.`,
+    "Example: Insomnia Cookies delivery to 506 20th St, San Francisco.",
   ].join("\n");
 }
 
