@@ -306,7 +306,7 @@ async function handleCheckout(
     await notify(
       job,
       options,
-      "I issued a checkout card. Live browser payment placement is not wired yet, so I stopped before submitting the order.",
+      "Status: checkout paused. I issued a checkout card. Live browser payment placement is not wired yet, so I stopped before submitting the order.",
     );
     return;
   }
@@ -332,7 +332,7 @@ async function handleCheckout(
   await notify(
     job,
     options,
-    "Dry run: I did not place a real order. I'll create Stripe split links from the draft cart total.",
+    "Status: test checkout complete. Dry run: I did not place a real order. I'll create Stripe split links from the draft cart total.",
   );
 }
 
@@ -470,8 +470,13 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
     .slice(0, 5)
     .map((item) => `${item.quantity}x ${item.name}`)
     .join(", ");
+  const statusLine =
+    cart.status === "blocked" ? "Status: cart blocked."
+    : cart.status === "draft" ? "Status: draft cart ready."
+    : "Status: checkout-ready cart.";
 
   return [
+    statusLine,
     cart.status === "blocked" ?
       `I could not build a checkout-ready cart at ${restaurant.name}.${totalLine}`
     : `I built a FastTab draft cart at ${restaurant.name}.${totalLine}`,
@@ -488,11 +493,11 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
 function formatRestaurantFoundText(restaurant: RestaurantOption): string {
   const pickup = restaurant.estimatedPickupTime ? ` Pickup estimate: ${restaurant.estimatedPickupTime}.` : "";
 
-  return `I found ${restaurant.name}.${pickup} I'm building a draft cart now.`;
+  return `Status: building cart. I found ${restaurant.name}.${pickup} I'm building a draft cart now.`;
 }
 
 function formatPaymentLinkText(amountCents: number, url: string): string {
-  return `FastTab split: your share is $${(amountCents / 100).toFixed(2)}.\nPay here: ${url}`;
+  return `Status: split ready. FastTab split: your share is $${(amountCents / 100).toFixed(2)}.\nPay here: ${url}`;
 }
 
 async function notify(
@@ -552,7 +557,12 @@ async function handleJobFailure(
     await notify(
       job,
       options,
-      `I found ${restaurantName}, but couldn't build a draft cart yet. Reply 'retry cart' and I'll try again.`,
+      [
+        "Status: cart retry needed.",
+        `I found ${restaurantName}, but couldn't build a draft cart yet.`,
+        `Reason: ${formatFailureReason(message)}`,
+        "Reply 'retry cart' and I'll try again.",
+      ].join("\n"),
     );
     return;
   }
@@ -567,7 +577,11 @@ async function handleJobFailure(
     await notify(
       job,
       options,
-      "I couldn't apply that cart change. Send another change or reply 'retry cart' to rebuild the draft cart.",
+      [
+        "Status: cart change failed.",
+        `Reason: ${formatFailureReason(message)}`,
+        "Send another change or reply 'retry cart' to rebuild the draft cart.",
+      ].join("\n"),
     );
     return;
   }
@@ -579,4 +593,10 @@ function stringPayload(job: FoodrunJob, key: string): string | undefined {
   const value = job.payload[key];
 
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function formatFailureReason(message: string): string {
+  const trimmed = message.replace(/\s+/g, " ").trim();
+
+  return trimmed.length > 160 ? `${trimmed.slice(0, 157)}...` : trimmed;
 }

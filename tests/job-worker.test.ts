@@ -139,7 +139,7 @@ describe("processFoodrunJobs", () => {
       kind: "cart_build",
     });
     expect(sent[0]).toMatchObject({
-      body: "I found Mission Thai. I'm building a draft cart now.",
+      body: "Status: building cart. I found Mission Thai. I'm building a draft cart now.",
     });
   });
 
@@ -248,7 +248,12 @@ describe("processFoodrunJobs", () => {
       state: "selecting_restaurant",
     });
     expect(sent[0]).toMatchObject({
-      body: "I found Mission Thai, but couldn't build a draft cart yet. Reply 'retry cart' and I'll try again.",
+      body: [
+        "Status: cart retry needed.",
+        "I found Mission Thai, but couldn't build a draft cart yet.",
+        'Reason: Unexpected token "T", "Task stopp"... is not valid JSON',
+        "Reply 'retry cart' and I'll try again.",
+      ].join("\n"),
     });
   });
 
@@ -294,6 +299,7 @@ describe("processFoodrunJobs", () => {
 
     expect(sent[0]).toMatchObject({
       body: [
+        "Status: cart blocked.",
         "I could not build a checkout-ready cart at Mission Thai.",
         "Blocked by: Task stopped before checkout",
         "Reply 'retry cart' to try again, or send a different restaurant or preference.",
@@ -542,7 +548,8 @@ describe("processFoodrunJobs", () => {
       ],
     });
     expect(sent[0]).toMatchObject({
-      body: "FastTab split: your share is $42.00.\nPay here: https://buy.stripe.com/test_123",
+      body:
+        "Status: split ready. FastTab split: your share is $42.00.\nPay here: https://buy.stripe.com/test_123",
     });
   });
 });

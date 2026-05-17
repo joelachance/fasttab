@@ -155,7 +155,7 @@ describe("text intake", () => {
 
     expect(result).toMatchObject({
       state: "searching_restaurants",
-      reply: "Great. I'll search for restaurants that match your preferences.",
+      reply: "Status: searching restaurants. I'll text you when I find a match and start the cart.",
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
@@ -191,7 +191,7 @@ describe("text intake", () => {
 
     expect(result).toMatchObject({
       state: "building_cart",
-      reply: "I'm still working on that FastTab step. I'll text you when the draft cart is ready.",
+      reply: "Status: still working. I'll text you when this FastTab step finishes or needs input.",
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
@@ -245,7 +245,8 @@ describe("text intake", () => {
 
     expect(result).toMatchObject({
       state: "building_cart",
-      reply: "I'll retry building the FastTab draft cart.",
+      reply:
+        "Status: retrying cart. I'll text you when the draft cart is ready, or if checkout blocks me.",
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
@@ -280,7 +281,8 @@ describe("text intake", () => {
 
     expect(result).toMatchObject({
       state: "building_cart",
-      reply: "I'll retry building the FastTab draft cart.",
+      reply:
+        "Status: retrying cart. I'll text you when the draft cart is ready, or if checkout blocks me.",
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
@@ -319,7 +321,8 @@ describe("text intake", () => {
 
     expect(result).toMatchObject({
       state: "confirming_cart",
-      reply: "I can't confirm that order because the cart is blocked. Reply 'retry cart' or send a cart change.",
+      reply:
+        "Status: cart blocked. I can't confirm the order until the cart is rebuilt. Reply 'retry cart' or send a cart change.",
     });
     expect(calls.map((call) => call.method)).toEqual([
       "createOrderSession",
