@@ -14,6 +14,11 @@ const rasterGrotesk = localFont({
   variable: "--font-raster-grotesk"
 });
 
+const formulaOne = localFont({
+  src: "./fonts/Formula1-Regular.otf",
+  variable: "--font-formula-one"
+});
+
 export const metadata: Metadata = {
   title: "fasttab.cc",
   description: "Split restaurant tabs by text with the FastTab agent."
@@ -27,7 +32,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${GeistSans.variable} ${appleGaramond.variable} ${rasterGrotesk.variable}`}
+        className={`${GeistSans.variable} ${appleGaramond.variable} ${rasterGrotesk.variable} ${formulaOne.variable}`}
       >
         {children}
       </body>

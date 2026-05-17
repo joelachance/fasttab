@@ -48,7 +48,7 @@ a {
 }
 
 .site-header > a:first-child {
-  font-family: var(--font-raster-grotesk), var(--font-geist-sans), sans-serif;
+  font-family: var(--font-formula-one), var(--font-geist-sans), sans-serif;
   font-feature-settings:
     "liga" 0,
     "clig" 0,

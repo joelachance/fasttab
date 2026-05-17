@@ -20,7 +20,7 @@ export default function Home() {
       <header className="site-header">
         <a href="/">{content.siteTitle}</a>
         <a className="header-cta" href={smsHref}>
-          Order Now: {formattedFastTabNumber}
+          Order Now
         </a>
       </header>
 
