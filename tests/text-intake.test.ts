@@ -7,7 +7,7 @@ import {
   type FoodrunTextStore,
 } from "../src/foodrun/text-intake";
 
-function createFakeStore(): {
+function createFakeStore(state = "collecting_preferences"): {
   store: FoodrunTextStore;
   calls: Array<{ method: string; input: unknown }>;
 } {
@@ -20,7 +20,7 @@ function createFakeStore(): {
         calls.push({ method: "createOrderSession", input });
         return {
           roomId: input.roomId,
-          state: input.state ?? "collecting_preferences",
+          state,
           initiatorPhoneNumber: input.initiatorPhoneNumber,
           confirmedPreferences: {},
           supermemoryContext: [],
@@ -169,5 +169,55 @@ describe("text intake", () => {
         channel: "sms",
       },
     });
+  });
+
+  test("does not enqueue duplicate work while a browser job is active", async () => {
+    const { store, calls } = createFakeStore("building_cart");
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "yes",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result).toMatchObject({
+      state: "building_cart",
+      reply: "I'm still working on that FastTab step. I'll text you when the draft cart is ready.",
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "createOrderSession",
+      "upsertParticipant",
+      "appendEvent",
+    ]);
+  });
+
+  test("requires explicit order confirmation once the cart is ready", async () => {
+    const { store, calls } = createFakeStore("confirming_cart");
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "yes",
+        channel: "imessage",
+      },
+      { store, memory: null },
+    );
+
+    expect(result).toMatchObject({
+      state: "confirming_cart",
+      reply: "Reply 'confirm order' to continue, or send changes to the cart.",
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      "createOrderSession",
+      "upsertParticipant",
+      "appendEvent",
+    ]);
   });
 });

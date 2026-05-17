@@ -66,6 +66,22 @@ export async function handleFoodrunTextMessage(
     },
   });
 
+  if (isBusy(session.state)) {
+    return {
+      reply: "I'm still working on that FastTab step. I'll text you when the draft cart is ready.",
+      state: session.state,
+      extracted,
+    };
+  }
+
+  if (session.state === "confirming_cart" && isYes(input.body)) {
+    return {
+      reply: "Reply 'confirm order' to continue, or send changes to the cart.",
+      state: "confirming_cart",
+      extracted,
+    };
+  }
+
   if (isCartEdit(input.body, session.state)) {
     await store.updateOrderSession(input.roomId, { state: "editing_cart" });
     await store.enqueueJob({
@@ -259,6 +275,12 @@ function extractBudgetPerPersonCents(text: string): number | undefined {
 
 function isYes(text: string): boolean {
   return /^(yes|y|yeah|yep|sure|ok|okay|go|search)$/i.test(text.trim());
+}
+
+function isBusy(state: string): boolean {
+  return ["searching_restaurants", "building_cart", "issuing_card", "checking_out", "splitting_bill"].includes(
+    state,
+  );
 }
 
 function isCartEdit(text: string, state: string): boolean {
