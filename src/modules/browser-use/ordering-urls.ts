@@ -32,12 +32,16 @@ const PROVIDER_HOST: Array<[OrderingProvider, RegExp]> = [
   ["blizzfull", /blizzfull\.com/i],
 ];
 
-export function hasOfficialDirectOrdering(restaurant: RestaurantOption): boolean {
+export function isInsomniaRestaurant(restaurant: RestaurantOption): boolean {
   if (buildOrderingUrlAttempts(restaurant).some((url) => DIRECT_ORDERING_HOST_PATTERN.test(url))) {
     return true;
   }
 
   return INSOMNIA_BRAND_PATTERN.test(restaurant.name);
+}
+
+export function hasOfficialDirectOrdering(restaurant: RestaurantOption): boolean {
+  return isInsomniaRestaurant(restaurant);
 }
 
 export function detectOrderingProvider(url: string): OrderingProvider {

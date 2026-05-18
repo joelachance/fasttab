@@ -209,10 +209,37 @@ describe("Browser Use module", () => {
       },
     );
 
-    expect(prompt).toContain("Within 60 seconds");
-    expect(prompt).toContain("Classic Chocolate Chunk");
+    expect(prompt).toContain("Within 90 seconds");
+    expect(prompt).toContain("Buy 9 Get 3 Free");
+    expect(prompt).toContain("Do NOT use GraphQL");
     expect(prompt).toContain("reCAPTCHA");
     expect(prompt).toContain("Do not open Grubhub");
+  });
+
+  test("buildCartPrompt insomnia seeded mode forbids API and targets checkout", () => {
+    const prompt = buildCartPrompt(
+      { ...criteria, preferences: ["Insomnia Cookies"] },
+      {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/checkout",
+        reason: "Cookie delivery",
+        dietaryFit: [],
+      },
+      {
+        insomniaSeededCart: {
+          orderCode: "abc123",
+          bundleCount: 2,
+          graphqlItemQuantity: 2,
+          checkoutUrl: "https://insomniacookies.com/checkout",
+          productUrl: "https://insomniacookies.com/products/buy-9-get-3-free-1",
+        },
+      },
+    );
+
+    expect(prompt).toContain("order code abc123");
+    expect(prompt).toContain("Do NOT use GraphQL");
+    expect(prompt).toContain("insomniacookies.com/checkout");
+    expect(prompt).toContain("buy-9-get-3-free-1");
   });
 
   test("buildCheckoutPlacementPrompt includes card, address, and customer phone", () => {

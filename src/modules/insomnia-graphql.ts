@@ -458,6 +458,107 @@ export class InsomniaGraphqlClient {
 
 export { INSOMNIA_DEFAULT_BUNDLE_COUNT };
 
+export const INSOMNIA_CHECKOUT_URL = "https://insomniacookies.com/checkout";
+export const INSOMNIA_B9G3F_PRODUCT_PATH = "/products/buy-9-get-3-free-1";
+
+export type InsomniaSeededCartResult = {
+  orderCode: string;
+  orderId?: string;
+  bundleCount: number;
+  /** Sum of line-item quantities from GraphQL order query. */
+  graphqlItemQuantity: number;
+  total?: number | null;
+  items?: InsomniaOrderSummary["items"];
+  checkoutUrl: string;
+  productUrl: string;
+};
+
+export function insomniaCheckoutUrls(orderCode: string): { checkoutUrl: string; productUrl: string } {
+  return {
+    checkoutUrl: INSOMNIA_CHECKOUT_URL,
+    productUrl: `https://insomniacookies.com${INSOMNIA_B9G3F_PRODUCT_PATH}`,
+  };
+}
+
+/** Delivery cart with B9G3F bundles + flavor options (no payment). */
+export async function seedInsomniaB9G3FDeliveryCart(input: {
+  client?: InsomniaGraphqlClient;
+  address: InsomniaAddressInput;
+  bundles?: number;
+  contact?: InsomniaCartContactInput;
+  configureFlavors?: boolean;
+}): Promise<InsomniaSeededCartResult> {
+  const bundles = input.bundles ?? INSOMNIA_DEFAULT_BUNDLE_COUNT;
+  const client = input.client ?? new InsomniaGraphqlClient();
+  const configureFlavors = input.configureFlavors ?? true;
+
+  const createResult = await client.createDeliveryCart({ address: input.address });
+  const createError = firstGraphqlErrorMessage(createResult.body);
+
+  if (createError) {
+    throw new Error(`createCart: ${createError}`);
+  }
+
+  const orderCode = createResult.body.data?.createCart.code;
+
+  if (!orderCode) {
+    throw new Error("createCart: missing order code");
+  }
+
+  const addResult = await client.addProductToOrder({
+    orderCode,
+    productId: INSOMNIA_B9G3F_PRODUCT_ID,
+    quantity: bundles,
+  });
+  const addError = firstGraphqlErrorMessage(addResult.body);
+
+  if (addError) {
+    throw new Error(`addProductToOrderV2: ${addError}`);
+  }
+
+  if (input.contact) {
+    const contactResult = await client.createCustomerContactOnOrder({
+      orderCode,
+      contact: input.contact,
+    });
+    const contactError = firstGraphqlErrorMessage(contactResult.body);
+
+    if (contactError) {
+      throw new Error(`createCustomerContactOnOrder: ${contactError}`);
+    }
+  }
+
+  let orderResult = await client.getOrder(orderCode);
+  let order = orderResult.body.data?.order;
+  const lineItemId = order?.items?.[0]?.id;
+
+  if (configureFlavors && lineItemId) {
+    await client.addFlavorOptions({
+      orderCode,
+      productId: INSOMNIA_B9G3F_PRODUCT_ID,
+      orderItemId: lineItemId,
+      flavors: flavorPicksForBundles(bundles),
+    });
+    orderResult = await client.getOrder(orderCode);
+    order = orderResult.body.data?.order;
+  }
+
+  const graphqlItemQuantity =
+    order?.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0;
+  const urls = insomniaCheckoutUrls(orderCode);
+
+  return {
+    orderCode,
+    orderId: order?.id,
+    bundleCount: bundles,
+    graphqlItemQuantity,
+    total: order?.total,
+    items: order?.items,
+    checkoutUrl: urls.checkoutUrl,
+    productUrl: urls.productUrl,
+  };
+}
+
 export function graphqlErrors(body: GraphqlResponse<unknown>): GraphqlError[] {
   return body.errors ?? [];
 }

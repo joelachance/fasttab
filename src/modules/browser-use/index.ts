@@ -11,8 +11,14 @@ import { z } from "zod";
 import { envWithDefault, requiredEnv, type Env } from "../../env.js";
 import type { CartSummary, Money, OrderCriteria, RestaurantOption } from "../../types.js";
 import {
+  INSOMNIA_B9G3F_DEAL_NAME,
+  INSOMNIA_B9G3F_PRODUCT_URL,
+  INSOMNIA_DEFAULT_BUNDLE_COUNT,
+} from "../insomnia-catalog-cart.js";
+import {
   buildOrderingUrlAttempts,
   hasOfficialDirectOrdering,
+  isInsomniaRestaurant,
   prefersMarketplaceOrdering,
   shouldDiscoverOrderingProviders,
   shouldTryMarketplaceOrdering,
@@ -247,11 +253,21 @@ export class BrowserUseModule {
 
 export type MarketplaceProvider = "grubhub" | "doordash";
 
+export type InsomniaSeededCartPromptContext = {
+  orderCode: string;
+  bundleCount: number;
+  graphqlItemQuantity: number;
+  checkoutUrl: string;
+  productUrl: string;
+};
+
 export type BuildCartPromptOptions = {
   orderingUrl?: string;
   discoverProviders?: boolean;
   useMarketplace?: boolean;
   marketplaceProvider?: MarketplaceProvider;
+  /** GraphQL pre-seed before Browser Use (repro / checkout-only). */
+  insomniaSeededCart?: InsomniaSeededCartPromptContext;
 };
 
 export const OFFICIAL_DIRECT_CART_TIMEOUT_MS = 270_000;
@@ -750,6 +766,27 @@ Return JSON shaped like:
 `.trim();
 }
 
+export function buildInsomniaSeededCartStrategy(
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  seeded: InsomniaSeededCartPromptContext,
+): string {
+  const location = criteria.location.placeName ?? criteria.location.raw;
+
+  return `
+Ordering provider strategy:
+- Stay on ${restaurant.name}. Do not switch to a different restaurant.
+- FastTab already created a delivery cart via Insomnia's backend (order code ${seeded.orderCode}, ${seeded.graphqlItemQuantity} bundle line qty, ${seeded.bundleCount}× "${INSOMNIA_B9G3F_DEAL_NAME}"). Your browser may not show that cart.
+- Start at ${seeded.checkoutUrl}. If the cart already shows "${INSOMNIA_B9G3F_DEAL_NAME}" (${seeded.bundleCount} bundles), confirm delivery to ${location} and stop before payment.
+- If the cart is empty, open ${seeded.productUrl} and add exactly ${seeded.bundleCount}× "${INSOMNIA_B9G3F_DEAL_NAME}" using the website UI only (pick any allowed flavors).
+- Do NOT use GraphQL, curl, Python, API calls, browser devtools network replay, or any programmatic ordering API.
+- If the site asks for a phone number, use the customer delivery phone from Order context (never an AgentPhone or bot number).
+- If reCAPTCHA appears at any point, stop immediately: return "status": "blocked" with blockers including "reCAPTCHA" — do not click, solve, or retry the captcha.
+- Within 90 seconds: if login or payment blocks checkout, return JSON with blockers immediately — do not loop or explore APIs.
+- Do not open Grubhub, DoorDash, or other sites in this attempt.
+- Build a guest-visible cart when possible; otherwise return a draft cart from visible menu items.`;
+}
+
 export function buildCartPrompt(
   criteria: OrderCriteria,
   restaurant: RestaurantOption,
@@ -770,17 +807,30 @@ Ordering provider strategy:
 - Open the best ordering page you find and build the cart there.
 - Spend up to about 90 seconds across provider attempts before returning blocked JSON.
 `
+    : promptOptions.insomniaSeededCart ?
+      buildInsomniaSeededCartStrategy(criteria, restaurant, promptOptions.insomniaSeededCart)
+    : hasOfficialDirectOrdering(restaurant) && isInsomniaRestaurant(restaurant) ?
+      `
+Ordering provider strategy:
+- Stay on ${restaurant.name}. Do not switch to a different restaurant.
+- Start at the ordering URL below. Set delivery to ${location} if prompted.
+- Add exactly ${INSOMNIA_DEFAULT_BUNDLE_COUNT}× "${INSOMNIA_B9G3F_DEAL_NAME}" from ${INSOMNIA_B9G3F_PRODUCT_URL} using the website UI only.
+- Do NOT use GraphQL, curl, Python, API calls, browser devtools network replay, or any programmatic ordering API.
+- If the site asks for a phone number, use the customer delivery phone from Order context (never an AgentPhone or bot number).
+- If reCAPTCHA appears, stop immediately: return blocked JSON with "reCAPTCHA" in blockers — do not click or solve it.
+- Within 90 seconds: if login or payment blocks checkout, return draft/blocked JSON. Do NOT spend the full session timeout searching.
+- Skip login forms and account creation — note them in blockers and return JSON immediately.
+- Do not open Grubhub, DoorDash, or other sites in this attempt.
+- Build a guest-visible cart when possible; otherwise return a draft cart from visible menu items.
+`
     : hasOfficialDirectOrdering(restaurant) ?
       `
 Ordering provider strategy:
 - Stay on ${restaurant.name}. Do not switch to a different restaurant.
-- Start at the official Insomnia Cookies ordering URL below. Enter the delivery address and store if prompted.
+- Start at the official ordering URL below. Enter the delivery address if prompted.
 - If the site asks for a phone number, use the customer delivery phone from Order context (never an AgentPhone or bot number).
-- Within 60 seconds: if checkout is blocked by reCAPTCHA, login, or payment, return JSON with "status": "draft" using visible menu prices. Do NOT spend the full session timeout searching or solving captchas.
-- Add at least 2-3 real cookie items from the visible menu (e.g. Classic Chocolate Chunk, Deluxe Chocolate Chunk, Snickerdoodle) with priceUsd from the page when visible.
-- Skip login forms, account creation, and reCAPTCHA loops — note them in blockers and return draft cart JSON immediately.
+- Within 60 seconds: if checkout is blocked by reCAPTCHA, login, or payment, return JSON with "status": "draft" using visible menu prices.
 - Do not open Grubhub, DoorDash, or other sites in this attempt.
-- Build a guest-visible cart when possible; otherwise return a draft cart from visible menu items.
 `
     : `
 Ordering provider strategy:
