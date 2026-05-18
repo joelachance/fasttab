@@ -325,6 +325,37 @@ describe("SpongeModule", () => {
     }
   });
 
+  test("fetchCheckoutCard reuses an existing session card without fetching", async () => {
+    const module = new SpongeModule(
+      { SPONGE_API_KEY: "sponge_live_agent_123" },
+      fakeWallet(
+        async () => {
+          throw new Error("issueVirtualCard should not be called");
+        },
+        {
+          async getCard() {
+            throw new Error("getCard should not be called when session card is complete");
+          },
+        },
+      ),
+    );
+
+    const card = await module.fetchCheckoutCard(
+      { SPONGE_API_KEY: "sponge_live_agent_123" },
+      {
+        existingCard: {
+          cardNumber: "4111111111111111",
+          cvc: "123",
+          expiryMonth: "12",
+          expiryYear: "2030",
+          raw: {},
+        },
+      },
+    );
+
+    expect(card.cardNumber).toBe("4111111111111111");
+  });
+
   test("fetches a virtual card by explicit payment method id", async () => {
     const module = new SpongeModule(
       { SPONGE_API_KEY: "sponge_live_agent_123" },

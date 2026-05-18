@@ -20,11 +20,7 @@ import {
   isInsomniaCatalogCart,
 } from "../modules/insomnia-catalog-cart.js";
 import { RestaurantAvailabilityModule } from "../modules/restaurant-availability.js";
-import {
-  isUsableFoodOrderCard,
-  SpongeModule,
-  type FoodOrderCard,
-} from "../modules/sponge/index.js";
+import { SpongeModule, type FoodOrderCard } from "../modules/sponge/index.js";
 import { StripeModule } from "../modules/stripe/index.js";
 import { splitEvenly } from "../modules/split-bill/index.js";
 import type { CartSummary, OrderCriteria, RestaurantOption, SplitLineItem } from "../types.js";
@@ -495,33 +491,29 @@ async function handleCheckout(
     throw new Error("Checkout requires a restaurant checkout URL");
   }
 
-  const sponge = options.sponge ?? new SpongeModule(options.env);
+  const env = options.env ?? process.env;
+  const sponge = options.sponge ?? new SpongeModule(env);
   let card: FoodOrderCard;
 
-  if (isUsableFoodOrderCard(session.spongeCard)) {
-    card = session.spongeCard!;
-  } else {
-    try {
-      card = await sponge.fetchExistingVirtualCard();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+  try {
+    card = await sponge.fetchCheckoutCard(env, { existingCard: session.spongeCard });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
 
-      if (message.includes("No active Sponge card") || message.includes("No issued virtual cards found")) {
-        await notify(job, options, "Status: no active Sponge card on this agent.");
-        throw new Error("no active Sponge card on this agent");
-      }
-
-      throw error;
-    }
-
-    if (!isUsableFoodOrderCard(card)) {
+    if (
+      message.includes("No active Sponge card") ||
+      message.includes("No issued virtual cards found") ||
+      message.includes("missing card number, CVC, or expiration")
+    ) {
       await notify(
         job,
         options,
-        "Status: no active Sponge card on this agent.",
+        "Status: checkout could not start — no active virtual payment card is available on this agent.",
       );
       throw new Error("no active Sponge card on this agent");
     }
+
+    throw error;
   }
 
   await options.store.updateOrderSession(job.roomId, {

@@ -361,23 +361,6 @@ function resolveVirtualCardId(env: Env, input: FetchFoodOrderCardInput = {}): st
   );
 }
 
-function usesSpongePlatformAgent(env: Env, apiKey: string): boolean {
-  if (apiKey.startsWith("sponge_master")) {
-    return true;
-  }
-
-  const isDirectAgentKey =
-    apiKey.startsWith("sponge_live_") ||
-    apiKey.startsWith("sponge_test_") ||
-    apiKey.startsWith("sp_");
-
-  if (isDirectAgentKey) {
-    return false;
-  }
-
-  return Boolean(env.SPONGE_AGENT_ID?.trim()) || Boolean(env.SPONGE_AGENT_NAME?.trim());
-}
-
 export function maskPan(pan: string | undefined): string | undefined {
   if (!pan) {
     return undefined;
@@ -624,8 +607,10 @@ export class SpongeModule {
     env: Env = this.env,
     options?: { virtualCardId?: string; existingCard?: FoodOrderCard },
   ): Promise<FoodOrderCard> {
-    if (isUsableFoodOrderCard(options?.existingCard)) {
-      return options.existingCard;
+    const existingCard = options?.existingCard;
+
+    if (existingCard && isUsableFoodOrderCard(existingCard)) {
+      return existingCard;
     }
 
     const virtualCardId = options?.virtualCardId?.trim() || resolveVirtualCardId(env);

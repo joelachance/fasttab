@@ -13,6 +13,7 @@ import {
   type FoodrunSponge,
   type FoodrunStripe,
 } from "../src/foodrun/job-worker";
+import { isUsableFoodOrderCard } from "../src/modules/sponge/index.js";
 import type { FoodrunJob, FoodrunOrderSession, FoodrunParticipant } from "../src/foodrun/order-state";
 
 const BROWSER_SEARCH_SESSION_ID = "11111111-1111-4111-8111-111111111111";
@@ -1044,7 +1045,7 @@ describe("processFoodrunJobs", () => {
       session,
     });
     const sponge: FoodrunSponge = {
-      fetchExistingVirtualCard: async () => ({
+      fetchCheckoutCard: async () => ({
         cardNumber: "4111111111111111",
         cvc: "123",
         expiration: "12/29",
@@ -1125,7 +1126,7 @@ describe("processFoodrunJobs", () => {
     });
     let checkoutSessionId: string | undefined;
     const sponge: FoodrunSponge = {
-      fetchExistingVirtualCard: async () => ({
+      fetchCheckoutCard: async () => ({
         cardNumber: "4111111111111111",
         cvc: "123",
         expiration: "12/29",
@@ -1239,7 +1240,7 @@ describe("processFoodrunJobs", () => {
       store,
       browser,
       sponge: {
-        fetchExistingVirtualCard: async () => ({
+        fetchCheckoutCard: async () => ({
           cardNumber: "4111111111111111",
           cvc: "123",
           expiration: "12/29",
@@ -1293,7 +1294,11 @@ describe("processFoodrunJobs", () => {
     await processFoodrunJobs(1, {
       store,
       sponge: {
-        fetchExistingVirtualCard: async () => {
+        fetchCheckoutCard: async (_env, options) => {
+          if (isUsableFoodOrderCard(options?.existingCard)) {
+            return options!.existingCard!;
+          }
+
           fetchCalled = true;
           throw new Error("should not fetch when session already has a card");
         },
@@ -1352,7 +1357,7 @@ describe("processFoodrunJobs", () => {
     await processFoodrunJobs(1, {
       store,
       sponge: {
-        fetchExistingVirtualCard: async () => {
+        fetchCheckoutCard: async () => {
           throw new Error("No active Sponge card on this agent. Enroll Sponge Card or set SPONGE_VIRTUAL_CARD_ID.");
         },
       },
@@ -1378,7 +1383,7 @@ describe("processFoodrunJobs", () => {
     expect(calls.find((call) => call.method === "failJob")?.input).toMatchObject({
       error: "no active Sponge card on this agent",
     });
-    expect(String((sent[0] as { body: string }).body)).toContain("no active Sponge card");
+    expect(String((sent[0] as { body: string }).body)).toContain("no active virtual payment card");
   });
 
   test("maskCardPan returns last four digits only", () => {
