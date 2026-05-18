@@ -4,7 +4,7 @@
  */
 import { SpongePlatform } from "@paysponge/sdk";
 
-import { envWithDefault, requiredEnv } from "../src/env.js";
+import { envWithDefault, envWithDotenvLocalOverrides, requiredEnv } from "../src/env.js";
 import {
   formatExpiry,
   lastFour,
@@ -47,8 +47,18 @@ async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
   console.error(`Using existing Sponge agent "${match.name}" (${match.id}).`);
 }
 
+function maskApiKeyPrefix(apiKey: string): string {
+  const trimmed = apiKey.trim();
+
+  if (trimmed.length <= 16) {
+    return `${trimmed.slice(0, 8)}...`;
+  }
+
+  return `${trimmed.slice(0, 16)}...`;
+}
+
 try {
-  const env = process.env;
+  const env = envWithDotenvLocalOverrides();
   const apiKey = env.SPONGE_API_KEY?.trim();
 
   if (!apiKey) {
@@ -56,6 +66,7 @@ try {
     process.exit(1);
   }
 
+  console.error(`Using SPONGE_API_KEY ${maskApiKeyPrefix(apiKey)} from .env.local`);
   requiredEnv(env, "SPONGE_API_KEY");
   await resolveSpongeAgentId(env);
 

@@ -20,7 +20,11 @@ import {
   isInsomniaCatalogCart,
 } from "../modules/insomnia-catalog-cart.js";
 import { RestaurantAvailabilityModule } from "../modules/restaurant-availability.js";
-import { SpongeModule, type FoodOrderCard } from "../modules/sponge/index.js";
+import {
+  isUsableFoodOrderCard,
+  SpongeModule,
+  type FoodOrderCard,
+} from "../modules/sponge/index.js";
 import { StripeModule } from "../modules/stripe/index.js";
 import { splitEvenly } from "../modules/split-bill/index.js";
 import type { CartSummary, OrderCriteria, RestaurantOption, SplitLineItem } from "../types.js";
@@ -77,7 +81,7 @@ export type FoodrunAvailabilityBrowserUse = FoodrunBrowserUse & {
 };
 export type FoodrunAvailabilityScanner = Pick<RestaurantAvailabilityModule, "findCandidates">;
 export type FoodrunStripe = Pick<StripeModule, "createPaymentLinks">;
-export type FoodrunSponge = Pick<SpongeModule, "issueFoodOrderCard">;
+export type FoodrunSponge = Pick<SpongeModule, "fetchCheckoutCard">;
 
 export type FoodrunJobNotifier = {
   sendText(input: {
@@ -492,16 +496,33 @@ async function handleCheckout(
   }
 
   const sponge = options.sponge ?? new SpongeModule(options.env);
-  const card = await sponge.issueFoodOrderCard({
-    amountUsd: foodOrderCardAmountUsd(totalCents, options.env),
-    merchantName: session.selectedRestaurant.name,
-    merchantUrl: checkoutUrl,
-    products: session.cart.items.map((item) => ({
-      name: item.name,
-      price: (item.price?.cents ?? 0) / 100,
-      quantity: item.quantity,
-    })),
-  });
+  let card: FoodOrderCard;
+
+  if (isUsableFoodOrderCard(session.spongeCard)) {
+    card = session.spongeCard!;
+  } else {
+    try {
+      card = await sponge.fetchExistingVirtualCard();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes("No active Sponge card") || message.includes("No issued virtual cards found")) {
+        await notify(job, options, "Status: no active Sponge card on this agent.");
+        throw new Error("no active Sponge card on this agent");
+      }
+
+      throw error;
+    }
+
+    if (!isUsableFoodOrderCard(card)) {
+      await notify(
+        job,
+        options,
+        "Status: no active Sponge card on this agent.",
+      );
+      throw new Error("no active Sponge card on this agent");
+    }
+  }
 
   await options.store.updateOrderSession(job.roomId, {
     state: "checking_out",

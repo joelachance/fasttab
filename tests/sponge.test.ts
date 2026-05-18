@@ -194,6 +194,7 @@ describe("SpongeModule", () => {
               card: {
                 id: "card_newer",
                 number: "4111111111111111",
+                cvc: "123",
                 expiry_month: "11",
                 expiry_year: "2031",
                 status: "active",
@@ -271,6 +272,59 @@ describe("SpongeModule", () => {
     }
   });
 
+  test("falls back to Sponge Card rain credentials when payment methods are unavailable", async () => {
+    const module = new SpongeModule(
+      { SPONGE_API_KEY: "sponge_live_agent_123" },
+      fakeWallet(
+        async () => {
+          throw new Error("issueVirtualCard should not be called");
+        },
+        {
+          getAgentId: () => "agent_123",
+          async getCard(options) {
+            if (options.card_type === "rain") {
+              return {
+                status: "ok",
+                card_type: "rain",
+                expiration_month: "12",
+                expiration_year: "2032",
+                card_number: "4111111111111111",
+                cvc: "123",
+              };
+            }
+
+            throw new Error("payment method fetch should not run");
+          },
+        },
+      ),
+    );
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+
+      if (url.includes("/payment-methods")) {
+        return new Response(JSON.stringify({ error: "forbidden" }), { status: 403 });
+      }
+
+      return originalFetch(input);
+    };
+
+    try {
+      const card = await module.fetchFoodOrderCard();
+
+      expect(card).toMatchObject({
+        cardNumber: "4111111111111111",
+        cvc: "123",
+        expiryMonth: "12",
+        expiryYear: "2032",
+        status: "ok",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("fetches a virtual card by explicit payment method id", async () => {
     const module = new SpongeModule(
       { SPONGE_API_KEY: "sponge_live_agent_123" },
@@ -283,7 +337,13 @@ describe("SpongeModule", () => {
             expect(options).toMatchObject({ payment_method_id: "pm_explicit" });
             return {
               payment_method_id: "pm_explicit",
-              card: { id: "card_explicit", last4: "4242", expiration: "12/30", status: "active" },
+              card: {
+                id: "card_explicit",
+                number: "4242424242424242",
+                cvc: "123",
+                expiration: "12/30",
+                status: "active",
+              },
             };
           },
         },

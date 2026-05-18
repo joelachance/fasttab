@@ -1043,17 +1043,13 @@ describe("processFoodrunJobs", () => {
       jobs: [job({ kind: "checkout_payment" })],
       session,
     });
-    const amounts: string[] = [];
     const sponge: FoodrunSponge = {
-      issueFoodOrderCard: async (input) => {
-        amounts.push(input.amountUsd ?? "");
-        return {
-          cardNumber: "4111111111111111",
-          cvc: "123",
-          expiration: "12/29",
-          raw: {},
-        };
-      },
+      fetchExistingVirtualCard: async () => ({
+        cardNumber: "4111111111111111",
+        cvc: "123",
+        expiration: "12/29",
+        raw: {},
+      }),
     };
     const browser: FoodrunBrowserUse = {
       searchRestaurants: async () => {
@@ -1086,7 +1082,6 @@ describe("processFoodrunJobs", () => {
       },
     });
 
-    expect(amounts).toEqual(["75.00"]);
     expect(calls.find((call) => call.method === "enqueueJob")?.input).toMatchObject({
       kind: "post_order_split",
     });
@@ -1128,18 +1123,14 @@ describe("processFoodrunJobs", () => {
       jobs: [job({ kind: "checkout_payment" })],
       session,
     });
-    const amounts: string[] = [];
     let checkoutSessionId: string | undefined;
     const sponge: FoodrunSponge = {
-      issueFoodOrderCard: async (input) => {
-        amounts.push(input.amountUsd ?? "");
-        return {
-          cardNumber: "4111111111111111",
-          cvc: "123",
-          expiration: "12/29",
-          raw: { card: { number: "4111111111111111", cvc: "123" } },
-        };
-      },
+      fetchExistingVirtualCard: async () => ({
+        cardNumber: "4111111111111111",
+        cvc: "123",
+        expiration: "12/29",
+        raw: { card: { number: "4111111111111111", cvc: "123" } },
+      }),
     };
     const sent: unknown[] = [];
     const notifier: FoodrunJobNotifier = {
@@ -1181,7 +1172,6 @@ describe("processFoodrunJobs", () => {
       },
     });
 
-    expect(amounts).toEqual(["105.00"]);
     expect(checkoutSessionId).toBe(BROWSER_CART_SESSION_ID);
     expect(String((sent[0] as { body: string }).body)).toContain("placing your order");
     expect(String((sent[1] as { body: string }).body)).toContain("order placed");
@@ -1249,7 +1239,7 @@ describe("processFoodrunJobs", () => {
       store,
       browser,
       sponge: {
-        issueFoodOrderCard: async () => ({
+        fetchExistingVirtualCard: async () => ({
           cardNumber: "4111111111111111",
           cvc: "123",
           expiration: "12/29",
@@ -1267,6 +1257,128 @@ describe("processFoodrunJobs", () => {
     expect(bodies.some((body) => body.includes("checkout failed"))).toBe(true);
     expect(bodies.some((body) => body.includes("ending 1111"))).toBe(true);
     expect(bodies.join("\n")).not.toContain("4111111111111111");
+  });
+
+  test("live checkout reuses session sponge card without fetching", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "issuing_card",
+      spongeCard: {
+        cardNumber: "4111111111111111",
+        cvc: "123",
+        expiration: "12/29",
+        raw: {},
+      },
+      selectedRestaurant: {
+        name: "Basil Cafe Thai Cuisine",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: [],
+      },
+      cart: {
+        restaurantName: "Basil Cafe Thai Cuisine",
+        checkoutUrl: "https://example.com/cart",
+        items: [{ name: "Pad Thai", quantity: 1, price: { currency: "usd", cents: 1550 } }],
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    };
+    const { store } = createStore({
+      jobs: [job({ kind: "checkout_payment" })],
+      session,
+    });
+    let fetchCalled = false;
+
+    await processFoodrunJobs(1, {
+      store,
+      sponge: {
+        fetchExistingVirtualCard: async () => {
+          fetchCalled = true;
+          throw new Error("should not fetch when session already has a card");
+        },
+      },
+      browser: {
+        searchRestaurants: async () => {
+          throw new Error("not used");
+        },
+        buildCart: async () => {
+          throw new Error("not used");
+        },
+        completeCheckout: async () => ({
+          sessionId: BROWSER_CART_SESSION_ID,
+          output: {
+            status: "placed",
+            confirmationNumber: "BASIL-42",
+            finalTotalUsd: 15.5,
+            blockers: [],
+            screenshots: [],
+          },
+          raw: { id: BROWSER_CART_SESSION_ID, output: "" },
+        }),
+      },
+      notifier: null,
+      env: { FOODRUN_CHECKOUT_MODE: "live" },
+    });
+
+    expect(fetchCalled).toBe(false);
+  });
+
+  test("live checkout fails with SMS when no sponge card is available", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "issuing_card",
+      selectedRestaurant: {
+        name: "Basil Cafe Thai Cuisine",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: [],
+      },
+      cart: {
+        restaurantName: "Basil Cafe Thai Cuisine",
+        checkoutUrl: "https://example.com/cart",
+        items: [{ name: "Pad Thai", quantity: 1, price: { currency: "usd", cents: 1550 } }],
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "checkout_payment" })],
+      session,
+    });
+    const sent: unknown[] = [];
+
+    await processFoodrunJobs(1, {
+      store,
+      sponge: {
+        fetchExistingVirtualCard: async () => {
+          throw new Error("No active Sponge card on this agent. Enroll Sponge Card or set SPONGE_VIRTUAL_CARD_ID.");
+        },
+      },
+      browser: {
+        searchRestaurants: async () => {
+          throw new Error("not used");
+        },
+        buildCart: async () => {
+          throw new Error("not used");
+        },
+        completeCheckout: async () => {
+          throw new Error("should not reach browser checkout");
+        },
+      },
+      notifier: {
+        sendText: async (input) => {
+          sent.push(input);
+        },
+      },
+      env: { FOODRUN_CHECKOUT_MODE: "live" },
+    });
+
+    expect(calls.find((call) => call.method === "failJob")?.input).toMatchObject({
+      error: "no active Sponge card on this agent",
+    });
+    expect(String((sent[0] as { body: string }).body)).toContain("no active Sponge card");
   });
 
   test("maskCardPan returns last four digits only", () => {

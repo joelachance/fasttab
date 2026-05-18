@@ -1,6 +1,6 @@
 import { SpongePlatform } from "@paysponge/sdk";
 
-import { envWithDefault, requiredEnv } from "../src/env.js";
+import { envWithDefault, envWithDotenvLocalOverrides, requiredEnv } from "../src/env.js";
 import {
   formatExpiry,
   lastFour,
@@ -41,6 +41,16 @@ async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
   console.error(`Using Sponge agent "${match.name}" (${match.id}).`);
 }
 
+function maskApiKeyPrefix(apiKey: string): string {
+  const trimmed = apiKey.trim();
+
+  if (trimmed.length <= 16) {
+    return `${trimmed.slice(0, 8)}...`;
+  }
+
+  return `${trimmed.slice(0, 16)}...`;
+}
+
 function safeCardOutput(card: FoodOrderCard) {
   const panSource = card.cardNumber && card.cardNumber.replace(/\D/g, "").length > 4 ? card.cardNumber : undefined;
 
@@ -61,7 +71,7 @@ function safeCardOutput(card: FoodOrderCard) {
 }
 
 try {
-  const env = process.env;
+  const env = envWithDotenvLocalOverrides();
   const apiKey = env.SPONGE_API_KEY?.trim();
 
   if (!apiKey) {
@@ -69,7 +79,7 @@ try {
     process.exit(1);
   }
 
-  requiredEnv(env, "SPONGE_API_KEY");
+  console.error(`Using SPONGE_API_KEY ${maskApiKeyPrefix(apiKey)} from .env.local`);
   await resolveSpongeAgentId(env);
 
   const sponge = new SpongeModule(env);
@@ -83,7 +93,7 @@ try {
   if (cardId || paymentMethodId) {
     console.error("Fetching Sponge card by id...");
   } else {
-    console.error("Listing Sponge payment methods and fetching the most recent card...");
+    console.error("Fetching active Sponge card for this agent...");
   }
 
   const card = await sponge.fetchFoodOrderCard({ cardId, paymentMethodId });
@@ -101,14 +111,12 @@ try {
 
   if (message.includes("Missing required environment variable: SPONGE_API_KEY")) {
     console.error("Missing SPONGE_API_KEY. Set it in .env.local (see .env.example).");
-  } else if (message.includes("No issued virtual cards found")) {
+  } else if (message.includes("No active Sponge card")) {
     console.error(message);
-    console.error("Issue a card with bun run sponge:issue-card or set SPONGE_CARD_ID / SPONGE_PAYMENT_METHOD_ID.");
-  } else if (message.includes("Sponge denied access to payment methods")) {
-    console.error(message);
+    console.error("Enroll Sponge Card on this agent or set SPONGE_VIRTUAL_CARD_ID in .env.local.");
   } else if (message.includes("fetch") || message.includes("401") || message.includes("403")) {
     console.error(`Sponge API request failed: ${message}`);
-    console.error("Check SPONGE_API_KEY, SPONGE_AGENT_ID, and SPONGE_API_BASE in .env.local.");
+    console.error("Check SPONGE_API_KEY and SPONGE_API_BASE in .env.local.");
   } else {
     console.error(`Failed to fetch Sponge card: ${message}`);
   }
