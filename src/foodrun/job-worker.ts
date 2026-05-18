@@ -224,15 +224,9 @@ async function searchRestaurants(
     return;
   }
 
-  const participants = await options.store.listParticipants(job.roomId);
-  const browser = options.browser ?? new BrowserUseModule(options.env);
-  const availabilityScanner =
-    options.availabilityScanner ?? new RestaurantAvailabilityModule(options.env ?? process.env);
-  await ensureSupermemoryContext(job, session, participants, options);
-  const sessionAfterMemory = await getSession(options.store, job.roomId);
-  const criteria = buildOrderCriteria(sessionAfterMemory, participants, undefined, options.env);
-
   if (shouldUseDemoRestaurantPipeline(options.env)) {
+    const participants = await options.store.listParticipants(job.roomId);
+    const criteria = buildOrderCriteria(session, participants, undefined, options.env);
     const restaurant = demoRestaurantFromCriteria(criteria);
 
     await options.store.updateOrderSession(job.roomId, {
@@ -251,13 +245,16 @@ async function searchRestaurants(
       kind: "cart_build",
       payload: job.payload,
     });
-    await notify(
-      job,
-      options,
-      `Status: demo mode. Using ${restaurant.name} (not a real restaurant). Building your draft cart now.`,
-    );
     return;
   }
+
+  const participants = await options.store.listParticipants(job.roomId);
+  const browser = options.browser ?? new BrowserUseModule(options.env);
+  const availabilityScanner =
+    options.availabilityScanner ?? new RestaurantAvailabilityModule(options.env ?? process.env);
+  await ensureSupermemoryContext(job, session, participants, options);
+  const sessionAfterMemory = await getSession(options.store, job.roomId);
+  const criteria = buildOrderCriteria(sessionAfterMemory, participants, undefined, options.env);
 
   const marketplaceRestaurant = marketplaceRestaurantFromPreferences(session.confirmedPreferences);
 
@@ -650,13 +647,14 @@ async function completeDryRunCheckout(
       agentNumberId: stringPayload(job, "agentNumberId"),
     },
   });
-  await notify(
-    job,
-    options,
-    demoCheckout ?
-      "Status: demo checkout complete (payment approved). No real restaurant order or card charge. I'll text Stripe split links from your cart total."
-    : "Status: test checkout complete. Dry run: I did not place a real order. I'll create Stripe split links from the draft cart total.",
-  );
+
+  if (!demoCheckout) {
+    await notify(
+      job,
+      options,
+      "Status: test checkout complete. Dry run: I did not place a real order. I'll create Stripe split links from the draft cart total.",
+    );
+  }
 }
 
 async function createPostOrderSplits(
@@ -1090,7 +1088,11 @@ function formatCartReadyText(
 }
 
 function formatCartBlockerLine(cart: CartSummary, env: Env = process.env): string {
-  if (isDemoCatalogCart(cart) || isInsomniaCatalogCart(cart)) {
+  if (isDemoCatalogCart(cart)) {
+    return "";
+  }
+
+  if (isInsomniaCatalogCart(cart)) {
     return cart.blockers[0] ?? "";
   }
 

@@ -244,7 +244,7 @@ async function handleFoodrunTextMessageCore(
     return {
       reply:
         isDemoFromStart(options.env) ?
-          "Status: demo mode. Building your draft cart now — I'll text when it's ready (not a real restaurant order)."
+          "Status: building your demo cart — I'll text when the draft is ready (not a real order)."
         : "Status: searching restaurants. I'll text you when I find a match and start the cart.",
       state: "searching_restaurants",
       extracted: preferences,

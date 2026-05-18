@@ -450,9 +450,7 @@ describe("processFoodrunJobs", () => {
       selectedRestaurant: { name: "FastTab Demo Bakery" },
       browserUseSessionId: null,
     });
-    expect(sent[0]).toMatchObject({
-      body: expect.stringContaining("demo mode"),
-    });
+    expect(sent).toHaveLength(0);
   });
 
   test("demo mode builds catalog cart without browser use", async () => {
@@ -1494,7 +1492,7 @@ describe("processFoodrunJobs", () => {
         raw: { checkoutMode: "dry_run", paymentApproved: true, demoMode: true },
       },
     });
-    expect(String((sent[0] as { body: string }).body)).toContain("demo checkout complete");
+    expect(sent).toHaveLength(0);
   });
 
   test("restaurant search loads supermemory context before criteria build", async () => {
