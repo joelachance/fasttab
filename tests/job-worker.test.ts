@@ -391,6 +391,7 @@ describe("processFoodrunJobs", () => {
       "Snickerdoodle",
     ]);
     expect(update?.cart?.items[0]?.price?.cents).toBe(449);
+    expect(update?.cart?.items[0]?.notes).toContain("+15551234567");
     expect(String((sent[0] as { body: string }).body)).toContain("Classic Chocolate Chunk");
     expect(String((sent[0] as { body: string }).body)).not.toContain("Blocked by:");
     expect(String((sent[0] as { body: string }).body)).not.toContain("Browser Use could not create");
@@ -1012,7 +1013,12 @@ describe("processFoodrunJobs", () => {
     const sponge: FoodrunSponge = {
       issueFoodOrderCard: async (input) => {
         amounts.push(input.amountUsd ?? "");
-        return { raw: { card: { number: "4111111111111111", cvc: "123" } } };
+        return {
+          cardNumber: "4111111111111111",
+          cvc: "123",
+          expiration: "12/29",
+          raw: { card: { number: "4111111111111111", cvc: "123" } },
+        };
       },
     };
     const sent: unknown[] = [];
@@ -1034,6 +1040,8 @@ describe("processFoodrunJobs", () => {
 
     expect(amounts).toEqual(["105.00"]);
     expect(String((sent[0] as { body: string }).body)).toContain("checkout card");
+    expect(String((sent[0] as { body: string }).body)).toContain("+15551234567");
+    expect(String((sent[1] as { body: string }).body)).toContain("Delivery phone: +15551234567");
   });
 
   test("dry-run checkout enqueues post-order split without placing an order", async () => {

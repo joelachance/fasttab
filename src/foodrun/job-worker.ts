@@ -32,6 +32,7 @@ import type {
   FoodrunOrderSession,
   FoodrunParticipant,
 } from "./order-state.js";
+import { resolveCustomerDeliveryPhone } from "./customer-phone.js";
 import { isDemoMode, shouldPlaceLiveOrders } from "./runtime-config.js";
 
 export const FOODRUN_JOB_MAX_DURATION_SECONDS = 300;
@@ -210,7 +211,7 @@ async function searchRestaurants(
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const availabilityScanner =
     options.availabilityScanner ?? new RestaurantAvailabilityModule(options.env ?? process.env);
-  const criteria = buildOrderCriteria(session, participants);
+  const criteria = buildOrderCriteria(session, participants, undefined, options.env);
 
   if (isDemoMode(options.env)) {
     const restaurant = demoRestaurantFromCriteria(criteria);
@@ -334,7 +335,7 @@ async function buildCart(
 
   const participants = await options.store.listParticipants(job.roomId);
   const browser = options.browser ?? new BrowserUseModule(options.env);
-  const criteria = buildOrderCriteria(session, participants);
+  const criteria = buildOrderCriteria(session, participants, undefined, options.env);
   const cart = await buildCartWithFallback(
     browser,
     criteria,
@@ -375,7 +376,7 @@ async function editCart(
   }
 
   const participants = await options.store.listParticipants(job.roomId);
-  const criteria = buildOrderCriteria(session, participants, stringPayload(job, "editText"));
+  const criteria = buildOrderCriteria(session, participants, stringPayload(job, "editText"), options.env);
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const cart = await buildCartWithFallback(
     browser,
@@ -402,7 +403,10 @@ async function editCart(
 }
 
 /** Second SMS when Sponge returns PAN/CVC (hackathon manual checkout). */
-function formatSpongeCardDetailsSms(card: FoodOrderCard): string | null {
+export function formatSpongeCardDetailsSms(
+  card: FoodOrderCard,
+  deliveryPhone?: string,
+): string | null {
   const pan = card.cardNumber?.trim();
 
   if (!pan) {
@@ -416,6 +420,7 @@ function formatSpongeCardDetailsSms(card: FoodOrderCard): string | null {
     `Card: ${pan}`,
     exp ? `Exp: ${exp}` : "",
     card.cvc?.trim() ? `CVC: ${card.cvc.trim()}` : "",
+    deliveryPhone ? `Delivery phone: ${deliveryPhone}` : "",
   ].filter(Boolean);
 
   return lines.join("\n");
@@ -433,6 +438,8 @@ async function handleCheckout(
   }
 
   if (shouldPlaceLiveOrders(options.env)) {
+    const participants = await options.store.listParticipants(job.roomId);
+    const deliveryPhone = resolveCustomerDeliveryPhone(session, participants, options.env);
     const sponge = options.sponge ?? new SpongeModule(options.env);
     const card = await sponge.issueFoodOrderCard({
       amountUsd: foodOrderCardAmountUsd(totalCents, options.env),
@@ -453,12 +460,12 @@ async function handleCheckout(
       state: "checking_out",
       spongeCard: card,
     });
-    await notify(
-      job,
-      options,
-      "Status: checkout paused. I issued a checkout card. Live browser payment placement is not wired yet, so I stopped before submitting the order.",
-    );
-    const cardSms = formatSpongeCardDetailsSms(card);
+    const checkoutStatus = deliveryPhone ?
+      `Status: checkout paused. I issued a checkout card. Use delivery phone ${deliveryPhone} on the restaurant site (not the FastTab text number). Live browser payment is not wired yet.`
+    : "Status: checkout paused. I issued a checkout card. Live browser payment placement is not wired yet, so I stopped before submitting the order.";
+
+    await notify(job, options, checkoutStatus);
+    const cardSms = formatSpongeCardDetailsSms(card, deliveryPhone);
 
     if (cardSms) {
       await notify(job, options, cardSms);
@@ -549,6 +556,7 @@ function buildOrderCriteria(
   session: FoodrunOrderSession,
   participants: FoodrunParticipant[],
   editText?: string,
+  env?: Env,
 ): OrderCriteria {
   const preferences = [
     ...(session.confirmedPreferences.dietary ?? []),
@@ -583,6 +591,7 @@ function buildOrderCriteria(
     participantCount: Math.max(participants.length, 1),
     preferences,
     allergies: session.confirmedPreferences.allergies ?? [],
+    deliveryPhone: resolveCustomerDeliveryPhone(session, participants, env),
   };
 }
 

@@ -24,6 +24,8 @@ export type OrderCriteria = {
   participantCount: number;
   preferences: string[];
   allergies: string[];
+  /** Customer phone for delivery/checkout (E.164), not AgentPhone's number. */
+  deliveryPhone?: string;
   surpriseUs?: boolean;
 };
 

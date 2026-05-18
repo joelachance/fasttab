@@ -677,6 +677,7 @@ Ordering provider strategy:
 Ordering provider strategy:
 - Stay on ${restaurant.name}. Do not switch to a different restaurant.
 - Start at the official Insomnia Cookies ordering URL below. Enter the delivery address and store if prompted.
+- If the site asks for a phone number, use the customer delivery phone from Order context (never an AgentPhone or bot number).
 - Within 60 seconds: if checkout is blocked by reCAPTCHA, login, or payment, return JSON with "status": "draft" using visible menu prices. Do NOT spend the full session timeout searching or solving captchas.
 - Add at least 2-3 real cookie items from the visible menu (e.g. Classic Chocolate Chunk, Deluxe Chocolate Chunk, Snickerdoodle) with priceUsd from the page when visible.
 - Skip login forms, account creation, and reCAPTCHA loops — note them in blockers and return draft cart JSON immediately.
@@ -715,6 +716,7 @@ Restaurant:
 Order context:
 - Location: ${location}
 - Participants: ${criteria.participantCount}
+${criteria.deliveryPhone ? `- Delivery phone (customer — use at checkout): ${criteria.deliveryPhone}` : ""}
 - Preferences: ${formatList(criteria.preferences)}
 - Allergies: ${formatList(criteria.allergies)}
 

@@ -214,6 +214,22 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("Do not open Grubhub");
   });
 
+  test("buildCartPrompt includes customer delivery phone for insomnia checkout", () => {
+    const prompt = buildCartPrompt(
+      { ...criteria, deliveryPhone: "+15551234567", preferences: ["Insomnia Cookies"] },
+      {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "Cookie delivery",
+        dietaryFit: [],
+      },
+    );
+
+    expect(prompt).toContain("Delivery phone (customer");
+    expect(prompt).toContain("+15551234567");
+    expect(prompt).toContain("never an AgentPhone");
+  });
+
   test("buildCartPrompt marketplace grubhub mode scopes to grubhub only", () => {
     const prompt = buildCartPrompt(
       criteria,
