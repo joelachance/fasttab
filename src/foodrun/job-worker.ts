@@ -590,12 +590,26 @@ function cartBuildTimeoutMs(env: Env = process.env): number {
   return Number(envWithDefault(env, "BROWSER_USE_CART_TIMEOUT_MS", "270000"));
 }
 
+const BROWSER_USE_SESSION_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Only real Browser Use session UUIDs can be resumed; catalog/demo ids are local markers. */
+export function browserUseResumeSessionId(sessionId?: string | null): string | undefined {
+  if (!sessionId) {
+    return undefined;
+  }
+
+  return BROWSER_USE_SESSION_ID.test(sessionId) ? sessionId : undefined;
+}
+
 function browserOptions(env: Env = process.env, session?: Pick<FoodrunOrderSession, "browserUseSessionId">) {
+  const sessionId = browserUseResumeSessionId(session?.browserUseSessionId);
+
   return {
     keepAlive: true,
     maxCostUsd: Number(env.BROWSER_USE_MAX_COST_USD ?? 2),
     timeoutMs: cartBuildTimeoutMs(env),
-    ...(session?.browserUseSessionId ? { sessionId: session.browserUseSessionId } : {}),
+    ...(sessionId ? { sessionId } : {}),
   };
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  browserUseResumeSessionId,
   FOODRUN_STALE_JOB_SECONDS,
   processFoodrunJobs,
   type FoodrunBrowserUse,
@@ -10,6 +11,10 @@ import {
   type FoodrunStripe,
 } from "../src/foodrun/job-worker";
 import type { FoodrunJob, FoodrunOrderSession, FoodrunParticipant } from "../src/foodrun/order-state";
+
+const BROWSER_SEARCH_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+const BROWSER_CART_SESSION_ID = "22222222-2222-4222-8222-222222222222";
+const BROWSER_CART_EDIT_SESSION_ID = "33333333-3333-4333-8333-333333333333";
 
 const baseSession: FoodrunOrderSession = {
   roomId: "room_123",
@@ -89,6 +94,15 @@ function createStore(input: {
   };
 }
 
+describe("browserUseResumeSessionId", () => {
+  test("accepts Browser Use UUIDs only", () => {
+    expect(browserUseResumeSessionId("insomnia_catalog_cart")).toBeUndefined();
+    expect(browserUseResumeSessionId("a1b2c3d4-e5f6-4789-a012-3456789abcde")).toBe(
+      "a1b2c3d4-e5f6-4789-a012-3456789abcde",
+    );
+  });
+});
+
 describe("processFoodrunJobs", () => {
   test("requeues stale running jobs before claiming work", async () => {
     let requeued = false;
@@ -157,7 +171,7 @@ describe("processFoodrunJobs", () => {
           allergies: ["peanuts"],
         });
         return {
-          sessionId: "browser_search_123",
+          sessionId: BROWSER_SEARCH_SESSION_ID,
           output: {
             restaurants: [
               {
@@ -194,7 +208,7 @@ describe("processFoodrunJobs", () => {
       input: {
         roomId: "room_123",
         state: "building_cart",
-        browserUseSessionId: "browser_search_123",
+        browserUseSessionId: BROWSER_SEARCH_SESSION_ID,
       },
     });
     expect(calls.find((call) => call.method === "enqueueJob")?.input).toMatchObject({
@@ -563,7 +577,7 @@ describe("processFoodrunJobs", () => {
         reason: "Close",
         dietaryFit: ["vegetarian"],
       },
-      browserUseSessionId: "browser_search_123",
+      browserUseSessionId: BROWSER_SEARCH_SESSION_ID,
     };
     const { store, calls } = createStore({
       jobs: [job({ kind: "cart_build" })],
@@ -575,11 +589,11 @@ describe("processFoodrunJobs", () => {
         throw new Error("searchRestaurants should not run in the cart_build job");
       },
       buildCart: async (_criteria, _restaurant, options) => {
-        expect(options?.sessionId).toBe("browser_search_123");
+        expect(options?.sessionId).toBe(BROWSER_SEARCH_SESSION_ID);
         expect(options?.timeoutMs).toBe(270_000);
 
         return {
-        sessionId: "browser_cart_123",
+        sessionId: BROWSER_CART_SESSION_ID,
         liveUrl: "https://browser.example.com/live",
         output: {
           restaurantName: "Mission Thai",
@@ -607,7 +621,7 @@ describe("processFoodrunJobs", () => {
       input: {
         roomId: "room_123",
         state: "confirming_cart",
-        browserUseSessionId: "browser_cart_123",
+        browserUseSessionId: BROWSER_CART_SESSION_ID,
       },
     });
     expect(sent[0]).toMatchObject({
@@ -627,7 +641,7 @@ describe("processFoodrunJobs", () => {
         reason: "Close",
         dietaryFit: ["vegetarian"],
       },
-      browserUseSessionId: "browser_search_123",
+      browserUseSessionId: BROWSER_SEARCH_SESSION_ID,
     };
     const { store, calls } = createStore({
       jobs: [job({ kind: "cart_build" })],
@@ -678,7 +692,7 @@ describe("processFoodrunJobs", () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
       state: "building_cart",
-      browserUseSessionId: "browser_search_123",
+      browserUseSessionId: BROWSER_SEARCH_SESSION_ID,
     };
     const { store, calls } = createStore({
       jobs: [job({ kind: "cart_build" })],
@@ -732,7 +746,7 @@ describe("processFoodrunJobs", () => {
         throw new Error("searchRestaurants should not run in the cart_build job");
       },
       buildCart: async () => ({
-        sessionId: "browser_cart_123",
+        sessionId: BROWSER_CART_SESSION_ID,
         output: {
           restaurantName: "Mission Thai",
           items: [],
@@ -787,7 +801,7 @@ describe("processFoodrunJobs", () => {
         expect(criteria.location.raw).toBe("60 Morris St, San Francisco, CA 94107");
 
         return {
-          sessionId: "browser_cart_123",
+          sessionId: BROWSER_CART_SESSION_ID,
           output: {
             restaurantName: "Mission Thai",
             items: [{ name: "Green Curry", quantity: 1 }],
@@ -851,7 +865,7 @@ describe("processFoodrunJobs", () => {
         reason: "Close",
         dietaryFit: ["vegetarian"],
       },
-      browserUseSessionId: "browser_cart_123",
+      browserUseSessionId: BROWSER_CART_SESSION_ID,
       cart: {
         restaurantName: "Mission Thai",
         items: [
@@ -877,7 +891,7 @@ describe("processFoodrunJobs", () => {
         throw new Error("searchRestaurants should not run in the cart_edit job");
       },
       buildCart: async (criteria, _restaurant, options) => {
-        expect(options?.sessionId).toBe("browser_cart_123");
+        expect(options?.sessionId).toBe(BROWSER_CART_SESSION_ID);
         expect(criteria.preferences).toContain(
           "Current cart before changes: Mission Thai, items: 2x Pad Thai $16.00 (no peanuts), total: $42.00",
         );
@@ -886,7 +900,7 @@ describe("processFoodrunJobs", () => {
         );
 
         return {
-          sessionId: "browser_cart_456",
+          sessionId: BROWSER_CART_EDIT_SESSION_ID,
           output: {
             restaurantName: "Mission Thai",
             items: [
@@ -907,13 +921,67 @@ describe("processFoodrunJobs", () => {
 
     expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
       state: "confirming_cart",
-      browserUseSessionId: "browser_cart_456",
+      browserUseSessionId: BROWSER_CART_EDIT_SESSION_ID,
       cart: {
         items: [
           { name: "Pad Thai", quantity: 1 },
           { name: "Green Curry", quantity: 1 },
         ],
       },
+    });
+  });
+
+  test("cart edit does not resume catalog session ids in Browser Use", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "confirming_cart",
+      selectedRestaurant: {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "catalog",
+        dietaryFit: [],
+      },
+      browserUseSessionId: "insomnia_catalog_cart",
+      cart: {
+        restaurantName: "Insomnia Cookies",
+        items: [{ name: "Classic Chocolate Chunk", quantity: 1, price: { currency: "usd", cents: 449 } }],
+        estimatedTotal: { currency: "usd", cents: 449 },
+        screenshots: [],
+        status: "draft",
+        blockers: [],
+      },
+    };
+    const { store } = createStore({
+      jobs: [job({ kind: "cart_edit", payload: { ...job().payload, editText: "add snickerdoodle" } })],
+      session,
+    });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run");
+      },
+      buildCart: async (_criteria, _restaurant, options) => {
+        expect(options?.sessionId).toBeUndefined();
+
+        return {
+          sessionId: "a1b2c3d4-e5f6-4789-a012-3456789abcde",
+          output: {
+            restaurantName: "Insomnia Cookies",
+            items: [{ name: "Snickerdoodle", quantity: 1 }],
+            estimatedTotal: { currency: "usd", cents: 898 },
+            screenshots: [],
+            status: "draft",
+            blockers: [],
+          },
+          raw: {} as never,
+        };
+      },
+    };
+
+    await processFoodrunJobs(1, {
+      store,
+      browser,
+      notifier: null,
+      env: { FOODRUN_INSOMNIA_CATALOG_CART: "false" },
     });
   });
 

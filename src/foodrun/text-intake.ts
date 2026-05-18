@@ -2,7 +2,7 @@ import { OrderSessionStore } from "./order-session-store.js";
 import type { ConfirmedPreferences, FoodrunOrderState } from "./order-state.js";
 import { SupermemoryModule } from "../modules/supermemory.js";
 import type { Env } from "../env.js";
-import { isDemoMode } from "./runtime-config.js";
+import { isDemoMode, shouldPlaceLiveOrders } from "./runtime-config.js";
 
 export type FoodrunTextMessage = {
   roomId: string;
@@ -173,7 +173,10 @@ export async function handleFoodrunTextMessage(
     });
 
     return {
-      reply: "Status: preparing checkout. Test mode will not place a real order.",
+      reply:
+        shouldPlaceLiveOrders(options.env) ?
+          "Status: preparing checkout. I'll text you a Sponge card to pay on the restaurant site."
+        : "Status: preparing checkout. Test mode will not place a real order.",
       state: "issuing_card",
       extracted,
     };

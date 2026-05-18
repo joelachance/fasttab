@@ -277,6 +277,31 @@ describe("text intake", () => {
     expect(calls.map((call) => call.method)).toContain("enqueueJob");
   });
 
+  test("confirm order mentions Sponge card in live checkout mode", async () => {
+    const { store } = createFakeStore("confirming_cart", {
+      cart: {
+        restaurantName: "Insomnia Cookies",
+        items: [{ name: "Classic Chocolate Chunk", quantity: 1 }],
+        screenshots: [],
+        status: "draft",
+        blockers: [],
+      },
+    });
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "confirm order",
+        channel: "imessage",
+      },
+      { store, memory: null, env: { FOODRUN_CHECKOUT_MODE: "live" } },
+    );
+
+    expect(result.reply).toContain("Sponge card");
+  });
+
   test("requires explicit order confirmation once the cart is ready", async () => {
     const { store, calls } = createFakeStore("confirming_cart");
 
