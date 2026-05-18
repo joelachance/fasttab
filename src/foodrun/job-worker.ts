@@ -56,7 +56,10 @@ export type FoodrunJobStore = Pick<
   | "enqueueJob"
 >;
 
-export type FoodrunBrowserUse = Pick<BrowserUseModule, "searchRestaurants" | "buildCart">;
+export type FoodrunBrowserUse = Pick<
+  BrowserUseModule,
+  "searchRestaurants" | "buildCart" | "completeCheckout"
+>;
 export type FoodrunAvailabilityBrowserUse = FoodrunBrowserUse & {
   verifyRestaurantCandidates?: BrowserUseModule["verifyRestaurantCandidates"];
 };
@@ -402,28 +405,44 @@ async function editCart(
   await notify(job, options, formatCartReadyText(session.selectedRestaurant, cart.output));
 }
 
-/** Second SMS when Sponge returns PAN/CVC (hackathon manual checkout). */
-export function formatSpongeCardDetailsSms(
-  card: FoodOrderCard,
-  deliveryPhone?: string,
-): string | null {
-  const pan = card.cardNumber?.trim();
+/** Last four digits only — safe for logs and user-facing errors. */
+export function maskCardPan(pan: string | undefined): string | undefined {
+  const digits = pan?.replace(/\D/g, "");
 
-  if (!pan) {
-    return null;
+  if (!digits || digits.length < 4) {
+    return undefined;
   }
 
-  const exp =
-    card.expiration?.trim() ||
-    (card.expiryMonth && card.expiryYear ? `${card.expiryMonth}/${card.expiryYear}` : "");
-  const lines = [
-    `Card: ${pan}`,
-    exp ? `Exp: ${exp}` : "",
-    card.cvc?.trim() ? `CVC: ${card.cvc.trim()}` : "",
-    deliveryPhone ? `Delivery phone: ${deliveryPhone}` : "",
-  ].filter(Boolean);
+  return digits.slice(-4);
+}
 
-  return lines.join("\n");
+export function spongeCardExpiration(card: FoodOrderCard): string | undefined {
+  return (
+    card.expiration?.trim() ||
+    (card.expiryMonth && card.expiryYear ? `${card.expiryMonth}/${card.expiryYear}` : undefined)
+  );
+}
+
+export function checkoutPaymentCardFromSponge(card: FoodOrderCard): {
+  cardNumber: string;
+  cvc: string;
+  expiration: string;
+  cardholderName?: string;
+} {
+  const cardNumber = card.cardNumber?.trim();
+  const cvc = card.cvc?.trim();
+  const expiration = spongeCardExpiration(card);
+
+  if (!cardNumber || !cvc || !expiration) {
+    throw new Error("Sponge card is missing card number, CVC, or expiration for browser checkout");
+  }
+
+  return {
+    cardNumber,
+    cvc,
+    expiration,
+    cardholderName: card.cardholderName?.trim() || undefined,
+  };
 }
 
 async function handleCheckout(
@@ -437,46 +456,144 @@ async function handleCheckout(
     throw new Error("Checkout requires a selected restaurant and cart total");
   }
 
-  if (shouldPlaceLiveOrders(options.env)) {
-    const participants = await options.store.listParticipants(job.roomId);
-    const deliveryPhone = resolveCustomerDeliveryPhone(session, participants, options.env);
-    const sponge = options.sponge ?? new SpongeModule(options.env);
-    const card = await sponge.issueFoodOrderCard({
-      amountUsd: foodOrderCardAmountUsd(totalCents, options.env),
-      merchantName: session.selectedRestaurant.name,
-      merchantUrl:
-        session.cart.checkoutUrl ??
-        session.selectedRestaurant.orderingUrl ??
-        session.selectedRestaurant.url ??
-        "https://example.com",
-      products: session.cart.items.map((item) => ({
-        name: item.name,
-        price: (item.price?.cents ?? 0) / 100,
-        quantity: item.quantity,
-      })),
-    });
-
-    await options.store.updateOrderSession(job.roomId, {
-      state: "checking_out",
-      spongeCard: card,
-    });
-    const checkoutStatus = deliveryPhone ?
-      `Status: checkout paused. I issued a checkout card. Use delivery phone ${deliveryPhone} on the restaurant site (not the FastTab text number). Live browser payment is not wired yet.`
-    : "Status: checkout paused. I issued a checkout card. Live browser payment placement is not wired yet, so I stopped before submitting the order.";
-
-    await notify(job, options, checkoutStatus);
-    const cardSms = formatSpongeCardDetailsSms(card, deliveryPhone);
-
-    if (cardSms) {
-      await notify(job, options, cardSms);
-    }
+  if (
+    !shouldPlaceLiveOrders(options.env) ||
+    isDemoMode(options.env) ||
+    isDemoCatalogCart(session.cart)
+  ) {
+    await completeDryRunCheckout(job, options, session, totalCents);
     return;
   }
+
+  const participants = await options.store.listParticipants(job.roomId);
+  const criteria = buildOrderCriteria(session, participants, undefined, options.env);
+  const checkoutUrl =
+    session.cart.checkoutUrl ??
+    session.selectedRestaurant.orderingUrl ??
+    session.selectedRestaurant.url;
+
+  if (!checkoutUrl) {
+    throw new Error("Checkout requires a restaurant checkout URL");
+  }
+
+  const sponge = options.sponge ?? new SpongeModule(options.env);
+  const card = await sponge.issueFoodOrderCard({
+    amountUsd: foodOrderCardAmountUsd(totalCents, options.env),
+    merchantName: session.selectedRestaurant.name,
+    merchantUrl: checkoutUrl,
+    products: session.cart.items.map((item) => ({
+      name: item.name,
+      price: (item.price?.cents ?? 0) / 100,
+      quantity: item.quantity,
+    })),
+  });
+
+  await options.store.updateOrderSession(job.roomId, {
+    state: "checking_out",
+    spongeCard: card,
+  });
+  await notify(
+    job,
+    options,
+    "Status: placing your order on the restaurant site now. I'll text you when it's confirmed or if checkout fails.",
+  );
+
+  const browser = options.browser ?? new BrowserUseModule(options.env);
+  const placement = await browser.completeCheckout(
+    {
+      criteria,
+      restaurant: session.selectedRestaurant,
+      cart: session.cart,
+      card: checkoutPaymentCardFromSponge(card),
+      checkoutUrl,
+    },
+    checkoutBrowserOptions(options.env, session),
+  );
+
+  await options.store.updateOrderSession(job.roomId, {
+    browserUseSessionId: placement.sessionId,
+    browserUseLiveUrl: placement.liveUrl,
+  });
+  await options.store.appendEvent({
+    roomId: job.roomId,
+    eventType: "browser_use_checkout_placement",
+    payload: {
+      status: placement.output.status,
+      confirmationNumber: placement.output.confirmationNumber,
+      blockers: placement.output.blockers,
+      cardLast4: maskCardPan(card.cardNumber),
+    },
+  });
+
+  if (placement.output.status !== "placed") {
+    const blockerText =
+      placement.output.blockers.length ?
+        placement.output.blockers.join(", ")
+      : `checkout ${placement.output.status}`;
+    const cardHint = maskCardPan(card.cardNumber);
+
+    await notify(
+      job,
+      options,
+      [
+        "Status: checkout failed. I could not place the order on the restaurant site.",
+        cardHint ? `Virtual card ending ${cardHint} was not charged successfully.` : "",
+        `Blocked by: ${blockerText}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    throw new Error(`Browser checkout ${placement.output.status}: ${blockerText}`);
+  }
+
+  const finalTotalCents =
+    placement.output.finalTotalUsd === undefined ?
+      totalCents
+    : Math.round(placement.output.finalTotalUsd * 100);
+  const confirmationNumber = placement.output.confirmationNumber?.trim();
 
   await options.store.updateOrderSession(job.roomId, {
     state: "splitting_bill",
     orderConfirmation: {
       restaurantName: session.selectedRestaurant.name,
+      confirmationNumber: confirmationNumber || undefined,
+      receiptUrl: placement.output.receiptUrl,
+      finalTotalCents,
+      eta: placement.output.eta,
+      raw: placement.output,
+    },
+  });
+  await options.store.enqueueJob({
+    roomId: job.roomId,
+    kind: "post_order_split",
+    payload: {
+      requestedBy: stringPayload(job, "requestedBy"),
+      agentId: stringPayload(job, "agentId"),
+      agentNumberId: stringPayload(job, "agentNumberId"),
+    },
+  });
+
+  const confirmationLine =
+    confirmationNumber ? ` Confirmation: ${confirmationNumber}.` : "";
+  const totalLine = ` Total: $${(finalTotalCents / 100).toFixed(2)}.`;
+
+  await notify(
+    job,
+    options,
+    `Status: order placed at ${session.selectedRestaurant.name}.${confirmationLine}${totalLine} I'll text Stripe split links next.`,
+  );
+}
+
+async function completeDryRunCheckout(
+  job: FoodrunJob,
+  options: ProcessFoodrunJobsOptions & { store: FoodrunJobStore },
+  session: FoodrunOrderSession,
+  totalCents: number,
+): Promise<void> {
+  await options.store.updateOrderSession(job.roomId, {
+    state: "splitting_bill",
+    orderConfirmation: {
+      restaurantName: session.selectedRestaurant!.name,
       confirmationNumber: `dry_run_${job.jobId}`,
       finalTotalCents: totalCents,
       raw: { checkoutMode: "dry_run" },
@@ -597,6 +714,20 @@ function buildOrderCriteria(
 
 function cartBuildTimeoutMs(env: Env = process.env): number {
   return Number(envWithDefault(env, "BROWSER_USE_CART_TIMEOUT_MS", "270000"));
+}
+
+function checkoutPlacementTimeoutMs(env: Env = process.env): number {
+  return Number(envWithDefault(env, "BROWSER_USE_CHECKOUT_TIMEOUT_MS", "270000"));
+}
+
+function checkoutBrowserOptions(
+  env: Env = process.env,
+  session?: Pick<FoodrunOrderSession, "browserUseSessionId">,
+) {
+  return {
+    ...browserOptions(env, session),
+    timeoutMs: checkoutPlacementTimeoutMs(env),
+  };
 }
 
 const BROWSER_USE_SESSION_ID =

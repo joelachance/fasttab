@@ -53,6 +53,33 @@ export const CartBuildOutputSchema = z.object({
   blockers: z.array(z.string()).default([]),
 });
 
+export const CheckoutPlacementOutputSchema = z.object({
+  status: z.enum(["placed", "failed", "blocked"]),
+  confirmationNumber: z.string().optional(),
+  receiptUrl: z.string().url().optional(),
+  finalTotalUsd: z.number().nonnegative().optional(),
+  eta: z.string().optional(),
+  blockers: z.array(z.string()).default([]),
+  screenshots: z.array(z.string()).default([]),
+});
+
+export type CheckoutPlacementOutput = z.output<typeof CheckoutPlacementOutputSchema>;
+
+export type CheckoutPaymentCard = {
+  cardNumber: string;
+  cvc: string;
+  expiration: string;
+  cardholderName?: string;
+};
+
+export type CompleteCheckoutInput = {
+  criteria: OrderCriteria;
+  restaurant: RestaurantOption;
+  cart: CartSummary;
+  card: CheckoutPaymentCard;
+  checkoutUrl: string;
+};
+
 export const BrowserPromptOutputSchema = z.object({
   summary: z.string().min(1),
   restaurants: z.array(BrowserRestaurantOptionSchema).default([]),
@@ -204,6 +231,17 @@ export class BrowserUseModule {
         output: normalizeCart(result.output),
       },
     };
+  }
+
+  async completeCheckout(
+    input: CompleteCheckoutInput,
+    options?: BrowserUseRunOptions,
+  ): Promise<BrowserUseRunResult<CheckoutPlacementOutput>> {
+    return this.runTask(
+      buildCheckoutPlacementPrompt(input),
+      CheckoutPlacementOutputSchema,
+      options,
+    );
   }
 }
 
@@ -650,6 +688,66 @@ ${shared}
 - Search Grubhub and DoorDash for the correct store near ${location}.
 - Prefer Grubhub first, then DoorDash.
 - Spend up to about 90 seconds across marketplace attempts before returning blocked JSON.`;
+}
+
+export function buildCheckoutPlacementPrompt(input: CompleteCheckoutInput): string {
+  const location = input.criteria.location.placeName ?? input.criteria.location.raw;
+  const items = input.cart.items
+    .map((item) => {
+      const price = item.price ? ` $${(item.price.cents / 100).toFixed(2)}` : "";
+      const notes = item.notes ? ` (${item.notes})` : "";
+
+      return `${item.quantity}x ${item.name}${price}${notes}`;
+    })
+    .join("; ");
+  const estimatedTotal =
+    input.cart.estimatedTotal ?
+      `$${(input.cart.estimatedTotal.cents / 100).toFixed(2)}`
+    : input.cart.subtotal ?
+      `$${(input.cart.subtotal.cents / 100).toFixed(2)} (subtotal)`
+    : "not specified";
+  const cardholder = input.card.cardholderName?.trim();
+
+  return `
+Complete checkout and place the food order on the restaurant site. Return structured JSON only.
+
+Context:
+- Checkout URL: ${input.checkoutUrl}
+- Restaurant: ${input.restaurant.name}
+- Pickup/delivery mode: ${input.criteria.pickupOrDelivery}
+- Delivery address: ${location}
+${input.criteria.deliveryPhone ? `- Customer phone for the order (never an AgentPhone or bot number): ${input.criteria.deliveryPhone}` : ""}
+- Cart items: ${items || "see site cart"}
+- Estimated total: ${estimatedTotal}
+- Preferences: ${formatList(input.criteria.preferences)}
+- Allergies: ${formatList(input.criteria.allergies)}
+
+Payment (virtual single-use card — enter exactly when prompted):
+- Card number: ${input.card.cardNumber}
+- Expiration: ${input.card.expiration}
+- CVC: ${input.card.cvc}
+${cardholder ? `- Cardholder name: ${cardholder}` : ""}
+
+Instructions:
+- Resume the existing browser session when possible and open the checkout URL above.
+- Verify the cart matches the items above; adjust quantities only if required for availability.
+- Enter the delivery address and customer phone when the site asks for contact or delivery details.
+- Complete payment with the card above and submit the order.
+- If the final total is within about 15% of the estimated total, proceed; otherwise stop and report a blocker.
+- Return "placed" only after the site shows an order confirmation or receipt.
+- Return "failed" or "blocked" with blockers if payment is declined, login is required, or placement cannot finish.
+
+Return JSON shaped like:
+{
+  "status": "placed",
+  "confirmationNumber": "ABC123",
+  "receiptUrl": "https://example.com/receipt",
+  "finalTotalUsd": 35.05,
+  "eta": "25-35 min",
+  "blockers": [],
+  "screenshots": []
+}
+`.trim();
 }
 
 export function buildCartPrompt(

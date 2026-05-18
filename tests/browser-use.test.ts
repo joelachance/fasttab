@@ -5,6 +5,7 @@ import type { MessageResponse, SessionResult } from "browser-use-sdk/v3";
 import {
   BrowserPromptOutputSchema,
   BrowserUseModule,
+  buildCheckoutPlacementPrompt,
   buildCartWithOrderingProviders,
   buildMarketplaceCartInParallel,
   buildOfficialDirectCartWithFallback,
@@ -212,6 +213,36 @@ describe("Browser Use module", () => {
     expect(prompt).toContain("Classic Chocolate Chunk");
     expect(prompt).toContain("reCAPTCHA");
     expect(prompt).toContain("Do not open Grubhub");
+  });
+
+  test("buildCheckoutPlacementPrompt includes card, address, and customer phone", () => {
+    const prompt = buildCheckoutPlacementPrompt({
+      criteria: { ...criteria, deliveryPhone: "+15551234567" },
+      restaurant,
+      checkoutUrl: "https://example.com/cart",
+      card: {
+        cardNumber: "4111111111111111",
+        cvc: "123",
+        expiration: "12/29",
+        cardholderName: "FastTab Agent",
+      },
+      cart: {
+        restaurantName: restaurant.name,
+        checkoutUrl: "https://example.com/cart",
+        items: [{ name: "Pad Thai", quantity: 2, price: { currency: "usd", cents: 1550 } }],
+        estimatedTotal: { currency: "usd", cents: 3100 },
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    });
+
+    expect(prompt).toContain("4111111111111111");
+    expect(prompt).toContain("CVC: 123");
+    expect(prompt).toContain("Hayes Valley");
+    expect(prompt).toContain("+15551234567");
+    expect(prompt).toContain("never an AgentPhone");
+    expect(prompt).toContain('"status": "placed"');
   });
 
   test("buildCartPrompt includes customer delivery phone for insomnia checkout", () => {

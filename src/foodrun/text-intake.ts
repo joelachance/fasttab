@@ -175,7 +175,7 @@ export async function handleFoodrunTextMessage(
     return {
       reply:
         shouldPlaceLiveOrders(options.env) ?
-          "Status: preparing checkout. I'll text you a Sponge card to pay on the restaurant site."
+          "Status: preparing checkout. I'll place the order on the restaurant site with a virtual card and text you when it's done."
         : "Status: preparing checkout. Test mode will not place a real order.",
       state: "issuing_card",
       extracted,

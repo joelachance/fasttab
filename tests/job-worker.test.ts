@@ -3,7 +3,9 @@ import { describe, expect, test } from "bun:test";
 import {
   browserUseResumeSessionId,
   cartTotalCents,
+  checkoutPaymentCardFromSponge,
   FOODRUN_STALE_JOB_SECONDS,
+  maskCardPan,
   processFoodrunJobs,
   type FoodrunBrowserUse,
   type FoodrunJobNotifier,
@@ -1030,7 +1032,7 @@ describe("processFoodrunJobs", () => {
         blockers: [],
       },
     };
-    const { store } = createStore({
+    const { store, calls } = createStore({
       jobs: [job({ kind: "checkout_payment" })],
       session,
     });
@@ -1046,10 +1048,30 @@ describe("processFoodrunJobs", () => {
         };
       },
     };
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("not used");
+      },
+      buildCart: async () => {
+        throw new Error("not used");
+      },
+      completeCheckout: async () => ({
+        sessionId: BROWSER_CART_SESSION_ID,
+        output: {
+          status: "placed",
+          confirmationNumber: "BASIL-42",
+          finalTotalUsd: 15.5,
+          blockers: [],
+          screenshots: [],
+        },
+        raw: { id: BROWSER_CART_SESSION_ID, output: "" },
+      }),
+    };
 
     await processFoodrunJobs(1, {
       store,
       sponge,
+      browser,
       notifier: null,
       env: {
         FOODRUN_CHECKOUT_MODE: "live",
@@ -1058,12 +1080,27 @@ describe("processFoodrunJobs", () => {
     });
 
     expect(amounts).toEqual(["75.00"]);
+    expect(calls.find((call) => call.method === "enqueueJob")?.input).toMatchObject({
+      kind: "post_order_split",
+    });
+    expect(
+      calls
+        .filter((call) => call.method === "updateOrderSession")
+        .map((call) => call.input)
+        .find((input) => (input as { orderConfirmation?: unknown }).orderConfirmation),
+    ).toMatchObject({
+      orderConfirmation: {
+        confirmationNumber: "BASIL-42",
+        finalTotalCents: 1550,
+      },
+    });
   });
 
-  test("live checkout issues sponge card at least SPONGE_FOOD_ORDER_CARD_AMOUNT_USD", async () => {
+  test("live checkout places order via browser use with sponge card floor", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
       state: "issuing_card",
+      browserUseSessionId: BROWSER_CART_SESSION_ID,
       selectedRestaurant: {
         name: "Insomnia Cookies",
         orderingUrl: "https://insomniacookies.com/",
@@ -1072,6 +1109,7 @@ describe("processFoodrunJobs", () => {
       },
       cart: {
         restaurantName: "Insomnia Cookies",
+        checkoutUrl: "https://insomniacookies.com/cart",
         items: [{ name: "Classic Chocolate Chunk", quantity: 1, price: { currency: "usd", cents: 449 } }],
         estimatedTotal: { currency: "usd", cents: 449 },
         screenshots: [],
@@ -1079,11 +1117,12 @@ describe("processFoodrunJobs", () => {
         blockers: [],
       },
     };
-    const { store } = createStore({
+    const { store, calls } = createStore({
       jobs: [job({ kind: "checkout_payment" })],
       session,
     });
     const amounts: string[] = [];
+    let checkoutSessionId: string | undefined;
     const sponge: FoodrunSponge = {
       issueFoodOrderCard: async (input) => {
         amounts.push(input.amountUsd ?? "");
@@ -1101,10 +1140,33 @@ describe("processFoodrunJobs", () => {
         sent.push(input);
       },
     };
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("not used");
+      },
+      buildCart: async () => {
+        throw new Error("not used");
+      },
+      completeCheckout: async (_input, runOptions) => {
+        checkoutSessionId = runOptions?.sessionId;
+        return {
+          sessionId: BROWSER_CART_SESSION_ID,
+          output: {
+            status: "placed",
+            confirmationNumber: "IC-99",
+            finalTotalUsd: 4.49,
+            blockers: [],
+            screenshots: [],
+          },
+          raw: { id: BROWSER_CART_SESSION_ID, output: "" },
+        };
+      },
+    };
 
     await processFoodrunJobs(1, {
       store,
       sponge,
+      browser,
       notifier,
       env: {
         FOODRUN_CHECKOUT_MODE: "live",
@@ -1113,9 +1175,105 @@ describe("processFoodrunJobs", () => {
     });
 
     expect(amounts).toEqual(["105.00"]);
-    expect(String((sent[0] as { body: string }).body)).toContain("checkout card");
-    expect(String((sent[0] as { body: string }).body)).toContain("+15551234567");
-    expect(String((sent[1] as { body: string }).body)).toContain("Delivery phone: +15551234567");
+    expect(checkoutSessionId).toBe(BROWSER_CART_SESSION_ID);
+    expect(String((sent[0] as { body: string }).body)).toContain("placing your order");
+    expect(String((sent[1] as { body: string }).body)).toContain("order placed");
+    expect(String((sent[1] as { body: string }).body)).toContain("IC-99");
+    expect(sent.some((message) => String((message as { body: string }).body).includes("Card:"))).toBe(
+      false,
+    );
+    expect(
+      calls.find((call) => call.method === "appendEvent" && call.input)?.input,
+    ).toMatchObject({
+      eventType: "browser_use_checkout_placement",
+      payload: { cardLast4: "1111" },
+    });
+  });
+
+  test("live checkout notifies and fails when browser placement is blocked", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "issuing_card",
+      selectedRestaurant: {
+        name: "Basil Cafe Thai Cuisine",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: [],
+      },
+      cart: {
+        restaurantName: "Basil Cafe Thai Cuisine",
+        checkoutUrl: "https://example.com/cart",
+        items: [{ name: "Pad Thai", quantity: 1, price: { currency: "usd", cents: 1550 } }],
+        estimatedTotal: { currency: "usd", cents: 1550 },
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "checkout_payment" })],
+      session,
+    });
+    const sent: unknown[] = [];
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("not used");
+      },
+      buildCart: async () => {
+        throw new Error("not used");
+      },
+      completeCheckout: async () => ({
+        sessionId: "browser_checkout_blocked",
+        output: {
+          status: "blocked",
+          blockers: ["Payment declined"],
+          screenshots: [],
+        },
+        raw: { id: "browser_checkout_blocked", output: "" },
+      }),
+    };
+
+    await processFoodrunJobs(1, {
+      store,
+      browser,
+      sponge: {
+        issueFoodOrderCard: async () => ({
+          cardNumber: "4111111111111111",
+          cvc: "123",
+          expiration: "12/29",
+          raw: {},
+        }),
+      },
+      notifier,
+      env: { FOODRUN_CHECKOUT_MODE: "live" },
+    });
+
+    expect(calls.find((call) => call.method === "failJob")?.input).toMatchObject({
+      error: expect.stringContaining("Browser checkout blocked"),
+    });
+    const bodies = sent.map((message) => String((message as { body: string }).body));
+    expect(bodies.some((body) => body.includes("checkout failed"))).toBe(true);
+    expect(bodies.some((body) => body.includes("ending 1111"))).toBe(true);
+    expect(bodies.join("\n")).not.toContain("4111111111111111");
+  });
+
+  test("maskCardPan returns last four digits only", () => {
+    expect(maskCardPan("4111111111111111")).toBe("1111");
+    expect(checkoutPaymentCardFromSponge({
+      cardNumber: "4111111111111111",
+      cvc: "123",
+      expiration: "12/29",
+      raw: {},
+    })).toEqual({
+      cardNumber: "4111111111111111",
+      cvc: "123",
+      expiration: "12/29",
+    });
   });
 
   test("dry-run checkout enqueues post-order split without placing an order", async () => {

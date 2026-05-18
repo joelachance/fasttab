@@ -277,7 +277,7 @@ describe("text intake", () => {
     expect(calls.map((call) => call.method)).toContain("enqueueJob");
   });
 
-  test("confirm order mentions Sponge card in live checkout mode", async () => {
+  test("confirm order mentions browser placement in live checkout mode", async () => {
     const { store } = createFakeStore("confirming_cart", {
       cart: {
         restaurantName: "Insomnia Cookies",
@@ -299,7 +299,7 @@ describe("text intake", () => {
       { store, memory: null, env: { FOODRUN_CHECKOUT_MODE: "live" } },
     );
 
-    expect(result.reply).toContain("Sponge card");
+    expect(result.reply).toContain("place the order on the restaurant site");
   });
 
   test("requires explicit order confirmation once the cart is ready", async () => {
