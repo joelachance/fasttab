@@ -382,6 +382,102 @@ describe("processFoodrunJobs", () => {
     expect(String((sent[0] as { body: string }).body)).toContain("Insomnia menu catalog");
   });
 
+  test("demo mode skips browser search and uses stub restaurant", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      confirmedPreferences: {
+        cuisines: ["Cookies"],
+        location: "506 20th St, San Francisco",
+        pickupOrDelivery: "delivery",
+      },
+    };
+    const { store, calls } = createStore({ jobs: [job()], session });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run in demo mode");
+      },
+      buildCart: async () => {
+        throw new Error("buildCart should not run in restaurant_search job");
+      },
+    };
+    const sent: unknown[] = [];
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await expect(
+      processFoodrunJobs(1, {
+        store,
+        browser,
+        availabilityScanner: {
+          findCandidates: async () => {
+            throw new Error("availability should not run in demo mode");
+          },
+        },
+        notifier,
+        env: { FOODRUN_DEMO_MODE: "true" },
+      }),
+    ).resolves.toMatchObject({ processed: 1 });
+
+    expect(calls.find((call) => call.method === "enqueueJob")?.input).toMatchObject({
+      kind: "cart_build",
+    });
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      selectedRestaurant: { name: "FastTab Demo Bakery" },
+      browserUseSessionId: null,
+    });
+    expect(sent[0]).toMatchObject({
+      body: expect.stringContaining("demo mode"),
+    });
+  });
+
+  test("demo mode builds catalog cart without browser use", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      confirmedPreferences: {
+        cuisines: ["Cookies"],
+        location: "506 20th St, San Francisco",
+        pickupOrDelivery: "delivery",
+      },
+      selectedRestaurant: {
+        name: "FastTab Demo Bakery",
+        orderingUrl: "https://fasttab.demo/",
+        reason: "demo",
+        dietaryFit: [],
+      },
+    };
+    const { store, calls } = createStore({ jobs: [job({ kind: "cart_build" })], session });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run");
+      },
+      buildCart: async () => {
+        throw new Error("buildCart should not run in demo mode");
+      },
+    };
+    const sent: unknown[] = [];
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await expect(
+      processFoodrunJobs(1, { store, browser, notifier, env: { FOODRUN_DEMO_MODE: "true" } }),
+    ).resolves.toMatchObject({ processed: 1 });
+
+    const update = calls.find((call) => call.method === "updateOrderSession")?.input as {
+      browserUseSessionId?: string;
+      cart?: { items: Array<{ name: string }> };
+    };
+    expect(update?.browserUseSessionId).toBe("demo_catalog_cart");
+    expect(update?.cart?.items[0]?.name).toBe("Classic Chocolate Chunk");
+    expect(String((sent[0] as { body: string }).body)).toContain("not a real order");
+  });
+
   test("notifies requester when restaurant search is missing a delivery area", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
