@@ -1,50 +1,19 @@
+/**
+ * Issues a new per-transaction Sponge virtual card.
+ * Prefer `bun run sponge:fetch-card` when reusing an already-issued card.
+ */
 import { SpongePlatform } from "@paysponge/sdk";
 
 import { envWithDefault, requiredEnv } from "../src/env.js";
-import { SpongeModule } from "../src/modules/sponge/index.js";
+import {
+  formatExpiry,
+  lastFour,
+  maskPan,
+  SpongeModule,
+} from "../src/modules/sponge/index.js";
 
 const MERCHANT_NAME = "Insomnia Cookies";
 const MERCHANT_URL = "https://insomniacookies.com/";
-
-function maskPan(pan: string | undefined): string | undefined {
-  if (!pan) {
-    return undefined;
-  }
-
-  const digits = pan.replace(/\D/g, "");
-
-  if (digits.length < 4) {
-    return "****";
-  }
-
-  return `****${digits.slice(-4)}`;
-}
-
-function formatExpiry(card: {
-  expiryMonth?: string;
-  expiryYear?: string;
-  expiration?: string;
-}): string | undefined {
-  if (card.expiration) {
-    return card.expiration;
-  }
-
-  if (card.expiryMonth && card.expiryYear) {
-    const year = card.expiryYear.length === 4 ? card.expiryYear.slice(-2) : card.expiryYear;
-    return `${card.expiryMonth.padStart(2, "0")}/${year}`;
-  }
-
-  return undefined;
-}
-
-function lastFour(pan: string | undefined): string | undefined {
-  if (!pan) {
-    return undefined;
-  }
-
-  const digits = pan.replace(/\D/g, "");
-  return digits.length >= 4 ? digits.slice(-4) : undefined;
-}
 
 const SPONGE_AGENT_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

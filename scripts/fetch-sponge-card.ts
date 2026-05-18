@@ -1,7 +1,13 @@
 import { SpongePlatform } from "@paysponge/sdk";
 
 import { envWithDefault, requiredEnv } from "../src/env.js";
-import { SpongeModule } from "../src/modules/sponge/index.js";
+import {
+  formatExpiry,
+  lastFour,
+  maskPan,
+  SpongeModule,
+  type FoodOrderCard,
+} from "../src/modules/sponge/index.js";
 
 const SPONGE_AGENT_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,7 +38,26 @@ async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
   }
 
   env.SPONGE_AGENT_ID = match.id;
-  console.error(`Using existing Sponge agent "${match.name}" (${match.id}).`);
+  console.error(`Using Sponge agent "${match.name}" (${match.id}).`);
+}
+
+function safeCardOutput(card: FoodOrderCard) {
+  const panSource = card.cardNumber && card.cardNumber.replace(/\D/g, "").length > 4 ? card.cardNumber : undefined;
+
+  return {
+    ok: true,
+    cardId: card.cardId,
+    paymentMethodId: card.paymentMethodId,
+    panMasked: maskPan(panSource) ?? (card.cardNumber && card.cardNumber.length <= 8 ? card.cardNumber : undefined),
+    last4: lastFour(panSource) ?? (card.cardNumber?.length === 4 ? card.cardNumber : undefined),
+    expiry: formatExpiry(card),
+    status: card.status,
+    amountUsd: card.amountUsd,
+    limitUsd: card.limitUsd,
+    merchantName: card.merchantName,
+    merchantUrl: card.merchantUrl,
+    cardholderName: card.cardholderName,
+  };
 }
 
 try {
@@ -44,22 +69,48 @@ try {
     process.exit(1);
   }
 
+  requiredEnv(env, "SPONGE_API_KEY");
   await resolveSpongeAgentId(env);
 
   const sponge = new SpongeModule(env);
-  const addresses = await sponge.getAddresses();
+  const cardId =
+    env.SPONGE_VIRTUAL_CARD_ID?.trim() ||
+    env.SPONGE_CARD_ID?.trim() ||
+    env.CARD_ID?.trim();
+  const paymentMethodId =
+    env.SPONGE_VIRTUAL_CARD_ID?.trim() || env.SPONGE_PAYMENT_METHOD_ID?.trim();
 
-  console.log(JSON.stringify({ ok: true, addresses }, null, 2));
+  if (cardId || paymentMethodId) {
+    console.error("Fetching Sponge card by id...");
+  } else {
+    console.error("Listing Sponge payment methods and fetching the most recent card...");
+  }
+
+  const card = await sponge.fetchFoodOrderCard({ cardId, paymentMethodId });
+
+  if (!card.cardId && !card.paymentMethodId && !card.cardNumber) {
+    console.error("Sponge API responded but no card identifiers were returned.");
+    console.error(JSON.stringify(card.raw, null, 2));
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify(safeCardOutput(card), null, 2));
+  console.error("Card fetched successfully.");
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes("Missing required environment variable: SPONGE_API_KEY")) {
     console.error("Missing SPONGE_API_KEY. Set it in .env.local (see .env.example).");
+  } else if (message.includes("No issued virtual cards found")) {
+    console.error(message);
+    console.error("Issue a card with bun run sponge:issue-card or set SPONGE_CARD_ID / SPONGE_PAYMENT_METHOD_ID.");
+  } else if (message.includes("Sponge denied access to payment methods")) {
+    console.error(message);
   } else if (message.includes("fetch") || message.includes("401") || message.includes("403")) {
     console.error(`Sponge API request failed: ${message}`);
-    console.error("Check SPONGE_API_KEY and SPONGE_API_BASE in .env.local.");
+    console.error("Check SPONGE_API_KEY, SPONGE_AGENT_ID, and SPONGE_API_BASE in .env.local.");
   } else {
-    console.error(`Failed to fetch Sponge wallet: ${message}`);
+    console.error(`Failed to fetch Sponge card: ${message}`);
   }
 
   process.exit(1);

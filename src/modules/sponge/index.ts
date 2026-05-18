@@ -1,4 +1,4 @@
-import { SpongePlatform, SpongeWallet } from "@paysponge/sdk";
+import { HttpClient, SpongePlatform, SpongeWallet } from "@paysponge/sdk";
 
 import { envWithDefault, requiredEnv, type Env } from "../../env.js";
 
@@ -14,6 +14,14 @@ export type FoodOrderShippingAddress = {
   state: string;
   postalCode: string;
   countryCode: string;
+};
+
+export type FetchExistingFoodOrderCardInput = {
+  amountUsd?: string;
+  merchantName?: string;
+  merchantUrl?: string;
+  cardType?: "rain" | "basis_theory_vaulted";
+  paymentMethodId?: string;
 };
 
 export type IssueFoodOrderCardInput = {
@@ -35,8 +43,33 @@ export type FoodOrderCard = {
   expiryYear?: string;
   expiration?: string;
   cardholderName?: string;
+  status?: string;
+  amountUsd?: string;
+  limitUsd?: string;
+  merchantName?: string;
+  merchantUrl?: string;
   billingAddress?: unknown;
   raw: unknown;
+};
+
+export type PaymentMethodSummary = {
+  paymentMethodId: string;
+  cardId?: string;
+  status?: string;
+  amountUsd?: string;
+  limitUsd?: string;
+  merchantName?: string;
+  merchantUrl?: string;
+  last4?: string;
+  expiryMonth?: string;
+  expiryYear?: string;
+  createdAt?: string;
+  raw: unknown;
+};
+
+export type FetchFoodOrderCardInput = {
+  cardId?: string;
+  paymentMethodId?: string;
 };
 
 type IssueVirtualCardRequest = {
@@ -57,9 +90,28 @@ type IssueVirtualCardRequest = {
   enrollment_id?: string;
 };
 
+type GetCardOptions = {
+  card_type?: "rain" | "basis_theory_vaulted";
+  payment_method_id?: string;
+  paymentMethodId?: string;
+  amount?: string;
+  currency?: string;
+  merchant_name?: string;
+  merchant_url?: string;
+};
+
 type SpongeWalletLike = {
   getAddresses?(): Promise<Record<string, string>>;
   issueVirtualCard(request: IssueVirtualCardRequest): Promise<unknown>;
+  getCard?(options?: GetCardOptions): Promise<unknown>;
+  getAgentId?(): string;
+};
+
+type SpongeConnection = {
+  wallet: SpongeWalletLike;
+  agentId: string;
+  apiKey: string;
+  baseUrl: string;
 };
 
 type SpongeWalletConnector = (options: {
@@ -126,29 +178,177 @@ function firstStringField(records: Record<string, unknown>[], ...names: string[]
   return undefined;
 }
 
-function normalizeFoodOrderCard(raw: unknown): FoodOrderCard {
+function normalizeFoodOrderCard(raw: unknown, metadata?: PaymentMethodSummary): FoodOrderCard {
   const response = asRecord(raw);
   const card = nestedRecord(response, "card", "virtualCard", "virtual_card");
   const paymentMethod = nestedRecord(response, "paymentMethod", "payment_method");
   const records = [response, card, paymentMethod];
 
   return {
-    paymentMethodId: firstStringField(records, "paymentMethodId", "payment_method_id"),
-    cardId: firstStringField(records, "cardId", "card_id", "id"),
+    paymentMethodId:
+      metadata?.paymentMethodId ??
+      firstStringField(records, "paymentMethodId", "payment_method_id"),
+    cardId: metadata?.cardId ?? firstStringField(records, "cardId", "card_id", "id"),
     cardNumber: firstStringField(records, "cardNumber", "card_number", "number", "pan"),
     cvc: firstStringField(records, "cvc", "cvv", "securityCode", "security_code"),
-    expiryMonth: firstStringField(records, "expiryMonth", "expiry_month", "expMonth", "exp_month"),
-    expiryYear: firstStringField(records, "expiryYear", "expiry_year", "expYear", "exp_year"),
+    expiryMonth:
+      metadata?.expiryMonth ??
+      firstStringField(records, "expiryMonth", "expiry_month", "expMonth", "exp_month", "expiration_month"),
+    expiryYear:
+      metadata?.expiryYear ??
+      firstStringField(records, "expiryYear", "expiry_year", "expYear", "exp_year", "expiration_year"),
     expiration: firstStringField(records, "expiration", "expiry", "expires", "expires_at"),
     cardholderName: firstStringField(records, "cardholderName", "cardholder_name", "name"),
+    status: metadata?.status ?? firstStringField(records, "status", "card_status", "state"),
+    amountUsd:
+      metadata?.amountUsd ??
+      firstStringField(records, "amount", "amount_usd", "amountUsd", "spending_limit", "spendingLimit"),
+    limitUsd: metadata?.limitUsd ?? firstStringField(records, "limit", "limit_usd", "limitUsd", "spending_limit"),
+    merchantName: metadata?.merchantName ?? firstStringField(records, "merchant_name", "merchantName"),
+    merchantUrl: metadata?.merchantUrl ?? firstStringField(records, "merchant_url", "merchantUrl"),
     billingAddress: response.billingAddress ?? response.billing_address ?? card.billingAddress ?? card.billing_address,
     raw,
   };
 }
 
+function paymentMethodRecords(raw: unknown): Record<string, unknown>[] {
+  const response = asRecord(raw);
+
+  if (Array.isArray(raw)) {
+    return raw.map((entry) => asRecord(entry));
+  }
+
+  for (const key of ["paymentMethods", "payment_methods", "methods", "items", "data"]) {
+    const value = response[key];
+
+    if (Array.isArray(value)) {
+      return value.map((entry) => asRecord(entry));
+    }
+  }
+
+  return [];
+}
+
+function normalizePaymentMethodSummary(raw: unknown): PaymentMethodSummary | undefined {
+  const record = asRecord(raw);
+  const paymentMethodId = firstStringField(
+    [record],
+    "paymentMethodId",
+    "payment_method_id",
+    "id",
+    "methodId",
+    "method_id",
+  );
+
+  if (!paymentMethodId) {
+    return undefined;
+  }
+
+  return {
+    paymentMethodId,
+    cardId: firstStringField([record], "cardId", "card_id", "virtualCardId", "virtual_card_id"),
+    status: firstStringField([record], "status", "card_status", "state"),
+    amountUsd: firstStringField([record], "amount", "amount_usd", "amountUsd"),
+    limitUsd: firstStringField([record], "limit", "limit_usd", "limitUsd", "spending_limit", "spendingLimit"),
+    merchantName: firstStringField([record], "merchant_name", "merchantName"),
+    merchantUrl: firstStringField([record], "merchant_url", "merchantUrl"),
+    last4: firstStringField([record], "last4", "last_4", "card_last4"),
+    expiryMonth: firstStringField([record], "expiryMonth", "expiry_month", "expiration_month"),
+    expiryYear: firstStringField([record], "expiryYear", "expiry_year", "expiration_year"),
+    createdAt: firstStringField(
+      [record],
+      "createdAt",
+      "created_at",
+      "issuedAt",
+      "issued_at",
+      "updatedAt",
+      "updated_at",
+    ),
+    raw,
+  };
+}
+
+function parseTimestamp(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = Date.parse(value);
+
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function pickMostRecentPaymentMethod(methods: PaymentMethodSummary[]): PaymentMethodSummary | undefined {
+  if (methods.length === 0) {
+    return undefined;
+  }
+
+  return [...methods].sort(
+    (left, right) => parseTimestamp(right.createdAt) - parseTimestamp(left.createdAt),
+  )[0];
+}
+
+export function maskPan(pan: string | undefined): string | undefined {
+  if (!pan) {
+    return undefined;
+  }
+
+  const digits = pan.replace(/\D/g, "");
+
+  if (digits.length < 4) {
+    return "****";
+  }
+
+  return `****${digits.slice(-4)}`;
+}
+
+export function formatExpiry(card: {
+  expiryMonth?: string;
+  expiryYear?: string;
+  expiration?: string;
+}): string | undefined {
+  if (card.expiration) {
+    return card.expiration;
+  }
+
+  if (card.expiryMonth && card.expiryYear) {
+    const year = card.expiryYear.length === 4 ? card.expiryYear.slice(-2) : card.expiryYear;
+    return `${card.expiryMonth.padStart(2, "0")}/${year}`;
+  }
+
+  return undefined;
+}
+
+export function isUsableFoodOrderCard(card: FoodOrderCard | undefined): boolean {
+  if (!card) {
+    return false;
+  }
+
+  const pan = card.cardNumber?.replace(/\D/g, "") ?? "";
+
+  if (pan.length < 13) {
+    return false;
+  }
+
+  if (!card.cvc?.trim()) {
+    return false;
+  }
+
+  return Boolean(formatExpiry(card));
+}
+
+export function lastFour(pan: string | undefined): string | undefined {
+  if (!pan) {
+    return undefined;
+  }
+
+  const digits = pan.replace(/\D/g, "");
+  return digits.length >= 4 ? digits.slice(-4) : undefined;
+}
+
 export class SpongeModule {
   private readonly defaultAmountUsd: string;
-  private readonly wallet: Promise<SpongeWalletLike>;
+  private readonly connection: Promise<SpongeConnection>;
 
   constructor(
     env: Env = process.env,
@@ -157,14 +357,19 @@ export class SpongeModule {
     connectPlatform: SpongePlatformConnector = SpongePlatform.connect,
   ) {
     this.defaultAmountUsd = envWithDefault(env, "SPONGE_FOOD_ORDER_CARD_AMOUNT_USD", "75");
-    this.wallet =
+    this.connection =
       wallet ?
-        Promise.resolve(wallet)
-      : createSpongeWallet(env, connect, connectPlatform);
+        Promise.resolve({
+          wallet,
+          agentId: wallet.getAgentId?.() ?? "",
+          apiKey: requiredEnv(env, "SPONGE_API_KEY"),
+          baseUrl: envWithDefault(env, "SPONGE_API_BASE", "https://api.wallet.paysponge.com"),
+        })
+      : createSpongeConnection(env, connect, connectPlatform);
   }
 
   async getAddresses(): Promise<Record<string, string>> {
-    const wallet = await this.wallet;
+    const { wallet } = await this.connection;
 
     if (!wallet.getAddresses) {
       throw new Error("Sponge wallet does not support getAddresses");
@@ -173,8 +378,144 @@ export class SpongeModule {
     return wallet.getAddresses();
   }
 
-  async issueFoodOrderCard(input: IssueFoodOrderCardInput): Promise<FoodOrderCard> {
+  async listPaymentMethods(): Promise<PaymentMethodSummary[]> {
+    const { agentId, apiKey, baseUrl } = await this.connection;
+    const http = new HttpClient({ apiKey, baseUrl });
+
+    try {
+      const response = await http.get(`/api/agents/${encodeURIComponent(agentId)}/payment-methods`);
+      return paymentMethodRecords(response)
+        .map((record) => normalizePaymentMethodSummary(record))
+        .filter((method): method is PaymentMethodSummary => Boolean(method));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes("401") || message.includes("403")) {
+        throw new Error(
+          `Sponge denied access to payment methods for agent ${agentId}. Set SPONGE_CARD_ID or SPONGE_PAYMENT_METHOD_ID to fetch a known card.`,
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  async fetchFoodOrderCard(input: FetchFoodOrderCardInput = {}): Promise<FoodOrderCard> {
+    const { wallet } = await this.connection;
+
+    if (!wallet.getCard) {
+      throw new Error("Sponge wallet does not support getCard");
+    }
+
+    const requestedId =
+      input.paymentMethodId?.trim() ||
+      input.cardId?.trim() ||
+      process.env.SPONGE_VIRTUAL_CARD_ID?.trim() ||
+      process.env.SPONGE_PAYMENT_METHOD_ID?.trim() ||
+      process.env.SPONGE_CARD_ID?.trim() ||
+      process.env.CARD_ID?.trim();
+
+    let metadata: PaymentMethodSummary | undefined;
+
+    if (requestedId) {
+      const methods = await this.listPaymentMethods().catch(() => []);
+      metadata = methods.find(
+        (method) =>
+          method.paymentMethodId === requestedId ||
+          method.cardId === requestedId,
+      ) ?? {
+        paymentMethodId: requestedId,
+        raw: { id: requestedId },
+      };
+    } else {
+      const methods = await this.listPaymentMethods();
+
+      if (methods.length === 0) {
+        throw new Error(
+          "No issued virtual cards found for this agent. Set SPONGE_VIRTUAL_CARD_ID or issue a card with bun run sponge:issue-card.",
+        );
+      }
+
+      metadata = pickMostRecentPaymentMethod(methods);
+    }
+
+    const paymentMethodId = metadata?.paymentMethodId ?? requestedId;
+
+    if (!paymentMethodId) {
+      throw new Error("Unable to resolve a payment method id for the requested card.");
+    }
+
+    const card = await wallet.getCard({
+      payment_method_id: paymentMethodId,
+      paymentMethodId,
+    });
+
+    return normalizeFoodOrderCard(card, metadata);
+  }
+
+  /** Reuse an already-issued virtual card (no new issuance). */
+  fetchExistingVirtualCard(input: FetchFoodOrderCardInput = {}): Promise<FoodOrderCard> {
+    return this.fetchFoodOrderCard(input);
+  }
+
+  async fetchExistingFoodOrderCard(input: FetchExistingFoodOrderCardInput = {}): Promise<FoodOrderCard | null> {
     const wallet = await this.wallet;
+
+    if (!wallet.getCard) {
+      throw new Error("Sponge wallet does not support getCard");
+    }
+
+    const cardType =
+      input.cardType ??
+      (envWithDefault(process.env, "SPONGE_CARD_TYPE", "rain") as "rain" | "basis_theory_vaulted");
+    const paymentMethodId =
+      input.paymentMethodId?.trim() || process.env.SPONGE_VIRTUAL_CARD_ID?.trim() || undefined;
+    const raw = await wallet.getCard({
+      card_type: cardType,
+      payment_method_id: paymentMethodId,
+      amount: input.amountUsd ?? this.defaultAmountUsd,
+      currency: "USD",
+      merchant_name: input.merchantName,
+      merchant_url: input.merchantUrl,
+    });
+    const response = asRecord(raw);
+
+    if (response.status === "selection_required") {
+      return null;
+    }
+
+    const secretKey = stringField(response, "secret_key", "secretKey");
+    const encryptedPan = nestedEncryptedField(response, "encrypted_pan", "encryptedPan");
+    const encryptedCvc = nestedEncryptedField(response, "encrypted_cvc", "encryptedCvc");
+    const cardNumber =
+      stringField(response, "card_number", "cardNumber", "card_number_plain", "number", "pan") ??
+      decryptSpongeCardField(encryptedPan, secretKey);
+    const cvc =
+      stringField(response, "cvc", "cvv", "securityCode", "security_code") ??
+      decryptSpongeCardField(encryptedCvc, secretKey);
+
+    if (!cardNumber && !cvc && !stringField(response, "cardId", "card_id", "paymentMethodId", "payment_method_id")) {
+      return null;
+    }
+
+    const card = normalizeFoodOrderCard({
+      ...response,
+      card: {
+        number: cardNumber,
+        cvc,
+        expiry_month: stringField(response, "expiration_month", "expiry_month", "expMonth", "exp_month"),
+        expiry_year: stringField(response, "expiration_year", "expiry_year", "expYear", "exp_year"),
+        cardholder_name: stringField(response, "cardholder_name", "cardholderName", "name"),
+        id: stringField(response, "card_id", "cardId", "id"),
+      },
+      payment_method_id: stringField(response, "payment_method_id", "paymentMethodId"),
+    });
+
+    return card.cardNumber && card.cvc ? card : null;
+  }
+
+  async issueFoodOrderCard(input: IssueFoodOrderCardInput): Promise<FoodOrderCard> {
+    const { wallet } = await this.connection;
     const card = await wallet.issueVirtualCard({
       amount: input.amountUsd ?? this.defaultAmountUsd,
       currency: "USD",
@@ -228,16 +569,27 @@ async function resolvePlatformAgentId(
   return match.id;
 }
 
-async function createSpongeWallet(
+async function createSpongeConnection(
   env: Env,
   connect: SpongeWalletConnector,
   connectPlatform: SpongePlatformConnector,
-): Promise<SpongeWalletLike> {
+): Promise<SpongeConnection> {
   const baseUrl = envWithDefault(env, "SPONGE_API_BASE", "https://api.wallet.paysponge.com");
   const apiKey = requiredEnv(env, "SPONGE_API_KEY");
+  const usePlatformAgent =
+    apiKey.startsWith("sponge_master") ||
+    Boolean(env.SPONGE_AGENT_ID?.trim()) ||
+    Boolean(env.SPONGE_AGENT_NAME?.trim());
 
-  if (!apiKey.startsWith("sponge_master")) {
-    return connect({ apiKey, baseUrl, noBrowser: true });
+  if (!usePlatformAgent) {
+    const wallet = await connect({ apiKey, baseUrl, noBrowser: true });
+
+    return {
+      wallet,
+      agentId: wallet.getAgentId?.() ?? "",
+      apiKey,
+      baseUrl,
+    };
   }
 
   const platform = await connectPlatform({ apiKey, baseUrl });
@@ -247,14 +599,21 @@ async function createSpongeWallet(
     envWithDefault(env, "SPONGE_AGENT_NAME", "Fasttab Foodrun Agent"),
   );
   const agentKey =
-    agentId ? await platform.getAgentApiKey(agentId, true)
+    agentId ? await platform.getAgentApiKey(agentId, apiKey.startsWith("sponge_test_"))
     : await createPlatformAgent(platform, env);
 
   if (!agentKey) {
     throw new Error("Sponge platform did not return an agent API key");
   }
 
-  return platform.connectAgent({ apiKey: agentKey, agentId });
+  const wallet = await platform.connectAgent({ apiKey: agentKey, agentId });
+
+  return {
+    wallet,
+    agentId: agentId ?? wallet.getAgentId?.() ?? "",
+    apiKey: agentKey,
+    baseUrl,
+  };
 }
 
 async function createPlatformAgent(

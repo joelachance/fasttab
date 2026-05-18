@@ -10,8 +10,8 @@
     "db:migrate": "node --env-file=.env.local --import tsx scripts/migrate.ts",
     "demo:collect": "bun run scripts/demo-collect-splits.ts",
     "foodrun:jobs": "bun --env-file=.env.local run scripts/process-jobs.ts",
-    "sponge:issue-card": "bun --env-file=.env.local run scripts/issue-sponge-card.ts",
     "sponge:fetch-card": "bun --env-file=.env.local run scripts/fetch-sponge-card.ts",
+    "sponge:issue-card": "bun --env-file=.env.local run scripts/issue-sponge-card.ts",
     "dev:webhook": "node --env-file=.env.local --import tsx src/server.ts",
     "setup:agentphone": "node --env-file=.env.local --import tsx src/provision.ts",
     "typecheck": "tsc --noEmit"
