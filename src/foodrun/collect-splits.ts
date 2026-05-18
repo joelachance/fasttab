@@ -79,7 +79,7 @@ export function formatPaymentLinkSms(
 ): string {
   const restaurant = restaurantName ? ` for ${restaurantName}` : "";
 
-  return `Foodrun demo${restaurant}: your share is $${(link.amountCents / 100).toFixed(2)}.\nPay with a Stripe test card: ${link.url}`;
+  return `Status: split ready. FastTab split${restaurant}: your share is $${(link.amountCents / 100).toFixed(2)}.\nPay here: ${link.url}`;
 }
 
 export function tryCreateAgentPhone(): AgentPhoneModule | null {

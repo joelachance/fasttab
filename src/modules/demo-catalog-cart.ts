@@ -1,47 +1,47 @@
 import type { CartSummary, OrderCriteria, RestaurantOption } from "../types.js";
 
 export const DEMO_CATALOG_CART_SESSION_ID = "demo_catalog_cart";
-export const DEMO_RESTAURANT_NAME = "FastTab Demo Bakery";
-export const DEMO_CATALOG_CART_NOTE =
-  "FastTab hackathon demo — not a real order. No browser or restaurant checkout.";
+export const DEMO_RESTAURANT_NAME = "Nari Thai Kitchen";
+/** Internal marker for stub carts; never shown in SMS. */
+export const DEMO_CATALOG_CART_MARKER = "__fasttab_stub_cart__";
 
-const DEMO_CHECKOUT_URL = "https://fasttab.demo/";
+const DEMO_CHECKOUT_URL = "https://order.narithai.example/menu";
 
 const DEMO_MENU = [
-  { name: "Classic Chocolate Chunk", cents: 449 },
-  { name: "Deluxe Chocolate Chunk", cents: 549 },
-  { name: "Snickerdoodle", cents: 449 },
-  { name: "Sugar Rush", cents: 499 },
-  { name: "Confetti Deluxe", cents: 549 },
+  { name: "Pad Thai", cents: 1695 },
+  { name: "Green Curry", cents: 1795 },
+  { name: "Drunken Noodles", cents: 1745 },
+  { name: "Tom Yum Soup", cents: 1295 },
+  { name: "Thai Iced Tea", cents: 495 },
 ] as const;
 
 export function demoRestaurantFromCriteria(criteria: OrderCriteria): RestaurantOption {
   return {
     name: DEMO_RESTAURANT_NAME,
     orderingUrl: DEMO_CHECKOUT_URL,
-    reason: DEMO_CATALOG_CART_NOTE,
+    reason: "Highly rated Thai near Mission",
     dietaryFit: criteria.preferences ?? [],
     address: criteria.location.placeName ?? criteria.location.raw,
   };
 }
 
 export function isDemoCatalogCart(cart: CartSummary): boolean {
-  return cart.blockers.some((blocker) => blocker.includes("hackathon demo"));
+  return cart.blockers.some((blocker) => blocker.includes(DEMO_CATALOG_CART_MARKER));
 }
 
 export function buildDemoCatalogCart(
   criteria: OrderCriteria,
   restaurant: RestaurantOption,
 ): CartSummary {
-  const cookieCount = Math.max(1, Math.min(criteria.participantCount, 6));
+  const itemCount = Math.max(1, Math.min(criteria.participantCount, 6));
   const deliveryNote = deliveryNotes(criteria);
-  const items = Array.from({ length: cookieCount }, (_, index) => {
-    const cookie = DEMO_MENU[index % DEMO_MENU.length];
+  const items = Array.from({ length: itemCount }, (_, index) => {
+    const dish = DEMO_MENU[index % DEMO_MENU.length];
 
     return {
-      name: cookie.name,
+      name: dish.name,
       quantity: 1,
-      price: { currency: "usd" as const, cents: cookie.cents },
+      price: { currency: "usd" as const, cents: dish.cents },
       notes: deliveryNote,
     };
   });
@@ -55,7 +55,7 @@ export function buildDemoCatalogCart(
     estimatedTotal: { currency: "usd", cents: subtotalCents },
     screenshots: [],
     status: "draft",
-    blockers: [DEMO_CATALOG_CART_NOTE],
+    blockers: [DEMO_CATALOG_CART_MARKER],
   };
 }
 

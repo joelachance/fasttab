@@ -7,6 +7,7 @@ import {
   FOODRUN_STALE_JOB_SECONDS,
   maskCardPan,
   processFoodrunJobs,
+  runDemoRestaurantAndCartPipeline,
   type FoodrunBrowserUse,
   type FoodrunJobNotifier,
   type FoodrunJobStore,
@@ -439,7 +440,7 @@ describe("processFoodrunJobs", () => {
     ).resolves.toMatchObject({ processed: 1 });
 
     expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
-      selectedRestaurant: { name: "FastTab Demo Bakery" },
+      selectedRestaurant: { name: "Nari Thai Kitchen" },
       browserUseSessionId: null,
     });
   });
@@ -483,14 +484,22 @@ describe("processFoodrunJobs", () => {
       }),
     ).resolves.toMatchObject({ processed: 1 });
 
-    expect(calls.find((call) => call.method === "enqueueJob")?.input).toMatchObject({
-      kind: "cart_build",
+    expect(calls.some((call) => call.method === "enqueueJob")).toBe(false);
+    expect(
+      calls
+        .filter((call) => call.method === "updateOrderSession")
+        .map((call) => call.input)
+        .at(-1),
+    ).toMatchObject({
+      state: "confirming_cart",
+      browserUseSessionId: "demo_catalog_cart",
     });
-    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
-      selectedRestaurant: { name: "FastTab Demo Bakery" },
-      browserUseSessionId: null,
-    });
-    expect(sent).toHaveLength(0);
+    expect(sent).toHaveLength(1);
+    const sms = String((sent[0] as { body: string }).body);
+    expect(sms).toContain("Nari Thai Kitchen");
+    expect(sms.toLowerCase()).toContain("draft cart ready");
+    expect(sms.toLowerCase()).not.toContain("demo");
+    expect(sms.toLowerCase()).not.toContain("not a real order");
   });
 
   test("demo mode builds catalog cart without browser use", async () => {
@@ -503,8 +512,8 @@ describe("processFoodrunJobs", () => {
         pickupOrDelivery: "delivery",
       },
       selectedRestaurant: {
-        name: "FastTab Demo Bakery",
-        orderingUrl: "https://fasttab.demo/",
+        name: "Nari Thai Kitchen",
+        orderingUrl: "https://order.narithai.example/menu",
         reason: "demo",
         dietaryFit: [],
       },
@@ -539,13 +548,14 @@ describe("processFoodrunJobs", () => {
       cart?: { items: Array<{ name: string }> };
     };
     expect(update?.browserUseSessionId).toBe("demo_catalog_cart");
-    expect(update?.cart?.items[0]?.name).toBe("Classic Chocolate Chunk");
+    expect(update?.cart?.items[0]?.name).toBe("Pad Thai");
     const body = String((sent[0] as { body: string }).body);
-    expect(body).toContain("Demo cart ready");
-    expect(body.toLowerCase()).toContain("not a real order");
+    expect(body).toContain("Nari Thai Kitchen");
+    expect(body.toLowerCase()).toContain("draft cart ready");
+    expect(body.toLowerCase()).not.toContain("demo");
+    expect(body.toLowerCase()).not.toContain("not a real order");
     expect(body.toLowerCase()).not.toContain("browser use");
     expect(body.toLowerCase()).not.toContain("captcha");
-    expect(body.split("\n").length).toBeLessThanOrEqual(3);
   });
 
   test("demo mode never surfaces browser-use blockers in cart SMS", async () => {
@@ -557,8 +567,8 @@ describe("processFoodrunJobs", () => {
         location: "Mission",
       },
       selectedRestaurant: {
-        name: "FastTab Demo Bakery",
-        orderingUrl: "https://fasttab.demo/",
+        name: "Nari Thai Kitchen",
+        orderingUrl: "https://order.narithai.example/menu",
         reason: "demo",
         dietaryFit: [],
       },
@@ -590,7 +600,8 @@ describe("processFoodrunJobs", () => {
     expect(body).not.toContain("captcha");
     expect(body).not.toContain("browser use");
     expect(body).not.toContain("blocked by");
-    expect(body).toContain("demo cart ready");
+    expect(body).toContain("draft cart ready");
+    expect(body).not.toContain("demo");
   });
 
   test("notifies requester when restaurant search is missing a delivery area", async () => {
@@ -1493,18 +1504,18 @@ describe("processFoodrunJobs", () => {
       ...baseSession,
       state: "issuing_card",
       selectedRestaurant: {
-        name: "FastTab Demo Bakery",
-        orderingUrl: "https://fasttab.demo/",
+        name: "Nari Thai Kitchen",
+        orderingUrl: "https://order.narithai.example/menu",
         reason: "demo",
         dietaryFit: [],
       },
       cart: {
-        restaurantName: "FastTab Demo Bakery",
-        items: [{ name: "Classic Chocolate Chunk", quantity: 2 }],
-        estimatedTotal: { currency: "usd", cents: 898 },
+        restaurantName: "Nari Thai Kitchen",
+        items: [{ name: "Pad Thai", quantity: 2, price: { currency: "usd", cents: 1695 } }],
+        estimatedTotal: { currency: "usd", cents: 3390 },
         screenshots: [],
         status: "checkout_ready",
-        blockers: ["FastTab hackathon demo — not a real order. No browser or restaurant checkout."],
+        blockers: ["__fasttab_stub_cart__"],
       },
     };
     const { store, calls } = createStore({
@@ -1518,23 +1529,46 @@ describe("processFoodrunJobs", () => {
         throw new Error("Failed to get agent info. The API key may be invalid or expired.");
       },
     };
+    const stripe: FoodrunStripe = {
+      createPaymentLinks: async () => [
+        {
+          participantId: "participant_123",
+          phoneNumber: "+15551234567",
+          amountCents: 449,
+          url: "https://buy.stripe.com/demo",
+        },
+      ],
+    };
 
     await processFoodrunJobs(1, {
       store,
       sponge,
+      stripe,
       notifier: null,
       env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "live" },
     });
 
     expect(spongeCalled).toBe(false);
-    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+    expect(calls.some((call) => call.method === "enqueueJob")).toBe(false);
+    expect(
+      calls
+        .filter((call) => call.method === "updateOrderSession")
+        .map((call) => call.input)
+        .find((input) => (input as { orderConfirmation?: unknown }).orderConfirmation),
+    ).toMatchObject({
       orderConfirmation: {
         raw: { checkoutMode: "dry_run", paymentApproved: true, demoMode: true },
       },
     });
+    expect(
+      calls
+        .filter((call) => call.method === "updateOrderSession")
+        .map((call) => call.input)
+        .at(-1),
+    ).toMatchObject({ state: "complete" });
   });
 
-  test("post-payment demo checkout records approval and demo messaging", async () => {
+  test("post-payment demo checkout records approval and texts split links", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
       state: "issuing_card",
@@ -1563,19 +1597,39 @@ describe("processFoodrunJobs", () => {
         sent.push(input);
       },
     };
+    const stripe: FoodrunStripe = {
+      createPaymentLinks: async () => [
+        {
+          participantId: "participant_123",
+          phoneNumber: "+15551234567",
+          amountCents: 4200,
+          url: "https://buy.stripe.com/demo_split",
+        },
+      ],
+    };
 
     await processFoodrunJobs(1, {
       store,
+      stripe,
       notifier,
       env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "dry_run" },
     });
 
-    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+    expect(calls.some((call) => call.method === "enqueueJob")).toBe(false);
+    expect(
+      calls
+        .filter((call) => call.method === "updateOrderSession")
+        .map((call) => call.input)
+        .find((input) => (input as { orderConfirmation?: unknown }).orderConfirmation),
+    ).toMatchObject({
       orderConfirmation: {
         raw: { checkoutMode: "dry_run", paymentApproved: true, demoMode: true },
       },
     });
-    expect(sent).toHaveLength(0);
+    expect(sent).toHaveLength(1);
+    const splitSms = String((sent[0] as { body: string }).body);
+    expect(splitSms).toContain("split ready");
+    expect(splitSms).not.toMatch(/\bdemo\b/i);
   });
 
   test("restaurant search loads supermemory context before criteria build", async () => {

@@ -58,6 +58,19 @@ function createFakeStore(
         calls.push({ method: "enqueueJob", input });
         return {} as never;
       },
+      listParticipants: async (roomId) => {
+        calls.push({ method: "listParticipants", input: roomId });
+        return [
+          {
+            participantId: "participant_123",
+            roomId,
+            phoneNumber: currentSession?.initiatorPhoneNumber ?? "+15551234567",
+            role: "initiator" as const,
+            preferences: {},
+            joinedAt: new Date("2026-05-17T18:00:00.000Z"),
+          },
+        ];
+      },
     },
   };
 }
@@ -319,11 +332,150 @@ describe("text intake", () => {
     ).toBe(true);
   });
 
-  test("confirm order uses demo checkout copy in demo mode", async () => {
+  test("demo yes builds cart inline without enqueueing jobs", async () => {
+    const { store, calls } = createFakeStore("confirming_preferences", {
+      confirmedPreferences: {
+        cuisines: ["Cookies"],
+        location: "506 20th St, San Francisco",
+        pickupOrDelivery: "delivery",
+      },
+    });
+    const sent: Array<{ body: string }> = [];
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "yes",
+        channel: "imessage",
+      },
+      {
+        store,
+        jobStore: store,
+        memory: {
+          rememberPreference: async () => {
+            throw new Error("supermemory should be skipped in demo mode");
+          },
+          searchPreferences: async () => {
+            throw new Error("supermemory should be skipped in demo mode");
+          },
+        },
+        notifier: {
+          sendText: async (input) => {
+            sent.push({ body: input.body });
+          },
+        },
+        env: { FOODRUN_DEMO_MODE: "true" },
+      },
+    );
+
+    expect(result.state).toBe("confirming_cart");
+    expect(result.reply).toContain("searching restaurants");
+    expect(result.reply.toLowerCase()).not.toContain("demo");
+    expect(calls.some((call) => call.method === "enqueueJob")).toBe(false);
+    expect(sent[0]?.body.toLowerCase()).toContain("draft cart ready");
+    expect(sent[0]?.body).toContain("Nari Thai Kitchen");
+  });
+
+  test("demo confirm order runs checkout and split inline", async () => {
+    const { store, calls } = createFakeStore("confirming_cart", {
+      selectedRestaurant: {
+        name: "Nari Thai Kitchen",
+        orderingUrl: "https://order.narithai.example/menu",
+        reason: "demo",
+        dietaryFit: [],
+      },
+      cart: {
+        restaurantName: "Nari Thai Kitchen",
+        items: [{ name: "Pad Thai", quantity: 2, price: { currency: "usd", cents: 1695 } }],
+        estimatedTotal: { currency: "usd", cents: 898 },
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    });
+    const sent: Array<{ body: string }> = [];
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "confirm order",
+        channel: "imessage",
+      },
+      {
+        store,
+        jobStore: store,
+        memory: null,
+        notifier: {
+          sendText: async (input) => {
+            sent.push({ body: input.body });
+          },
+        },
+        stripe: {
+          createPaymentLinks: async () => [
+            {
+              participantId: "participant_123",
+              phoneNumber: "+15551234567",
+              amountCents: 898,
+              url: "https://buy.stripe.com/demo",
+            },
+          ],
+        },
+        env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "live" },
+      },
+    );
+
+    expect(result.state).toBe("complete");
+    expect(result.reply.toLowerCase()).toContain("split");
+    expect(calls.some((call) => call.method === "enqueueJob")).toBe(false);
+    expect(sent[0]?.body).toContain("split ready");
+  });
+
+  test("demo mode skips supermemory on first message", async () => {
+    const { store, calls } = createFakeStore();
+    let searched = false;
+
+    await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "Cookies to 506 20th St, San Francisco",
+        channel: "sms",
+      },
+      {
+        store,
+        jobStore: store,
+        memory: {
+          rememberPreference: async () => ({}),
+          searchPreferences: async () => {
+            searched = true;
+            return { memories: [{ content: "vegan" }] };
+          },
+        },
+        env: { FOODRUN_DEMO_MODE: "true" },
+      },
+    );
+
+    expect(searched).toBe(false);
+    expect(
+      calls.some(
+        (call) =>
+          call.method === "appendEvent" &&
+          (call.input as { eventType?: string }).eventType === "supermemory_context_loaded",
+      ),
+    ).toBe(false);
+  });
+
+  test("confirm order uses realistic checkout copy when inline pipeline disabled", async () => {
     const { store } = createFakeStore("confirming_cart", {
       cart: {
-        restaurantName: "FastTab Demo Bakery",
-        items: [{ name: "Classic Chocolate Chunk", quantity: 1 }],
+        restaurantName: "Nari Thai Kitchen",
+        items: [{ name: "Pad Thai", quantity: 1, price: { currency: "usd", cents: 1695 } }],
+        estimatedTotal: { currency: "usd", cents: 1695 },
         screenshots: [],
         status: "checkout_ready",
         blockers: [],
@@ -338,12 +490,18 @@ describe("text intake", () => {
         body: "confirm order",
         channel: "imessage",
       },
-      { store, memory: null, env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "live" } },
+      {
+        store,
+        memory: null,
+        runDemoPipelineInline: false,
+        env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "live" },
+      },
     );
 
-    expect(result.reply).toContain("demo checkout");
+    expect(result.reply).toContain("preparing checkout");
+    expect(result.reply.toLowerCase()).not.toContain("demo");
     expect(result.reply).not.toContain("virtual card");
-    expect(result.reply).not.toContain("restaurant site");
+    expect(result.reply).not.toContain("not a real order");
   });
 
   test("confirm order mentions browser placement in live checkout mode", async () => {

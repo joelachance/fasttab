@@ -1,7 +1,7 @@
 /**
- * Vercel / production env for hackathon SMS demo (set all for bulletproof demo):
- * - FOODRUN_DEMO_MODE=true — stub bakery search/cart, no Browser Use blockers in SMS, forced dry-run checkout
- * - FOODRUN_DEMO_FROM_START=true — same pipeline (optional; FOODRUN_DEMO_MODE alone is enough)
+ * Vercel / production env for video-ready SMS demo (set all for bulletproof demo):
+ * - FOODRUN_DEMO_MODE=true — stub restaurant/cart, no Browser Use blockers in SMS, forced dry-run checkout
+ * - FOODRUN_DEMO_FROM_START=true — legacy flag (optional; FOODRUN_DEMO_MODE alone is enough)
  * - FOODRUN_CHECKOUT_MODE=dry_run — never Sponge / live browser checkout (ignored when demo mode is on)
  */
 import { envWithDefault, type Env } from "../env.js";
@@ -40,7 +40,7 @@ export function shouldPlaceLiveOrders(env: Env = process.env): boolean {
   return foodrunRuntimeConfig(env).checkoutMode === "live";
 }
 
-/** Hackathon SMS demo: stub restaurant/cart and/or post-approval checkout messaging. */
+/** Stub restaurant/cart pipeline with realistic SMS (no live Browser Use / Sponge). */
 export function isDemoMode(env: Env = process.env): boolean {
   return envWithDefault(env, "FOODRUN_DEMO_MODE", "false").toLowerCase() === "true";
 }
@@ -62,7 +62,7 @@ export function shouldUseDemoRestaurantPipeline(env: Env = process.env): boolean
   return isDemoMode(env);
 }
 
-/** Skip Sponge/Browser Use checkout; dry-run + demo SMS. */
+/** Skip Sponge/Browser Use checkout; dry-run only. */
 export function shouldUseDemoCheckout(
   _sessionState: FoodrunOrderState,
   env: Env = process.env,

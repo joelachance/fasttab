@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   buildDemoCatalogCart,
-  DEMO_CATALOG_CART_NOTE,
+  DEMO_CATALOG_CART_MARKER,
   demoRestaurantFromCriteria,
   isDemoCatalogCart,
 } from "../src/modules/demo-catalog-cart.js";
@@ -11,29 +11,31 @@ import type { OrderCriteria } from "../src/types.js";
 const criteria: OrderCriteria = {
   roomId: "room_123",
   location: { raw: "506 20th St, San Francisco, CA 94107", placeName: "506 20th St, San Francisco" },
-  cuisine: "Cookies",
+  cuisine: "Thai",
   pickupOrDelivery: "delivery",
   participantCount: 2,
-  preferences: ["cookies"],
+  preferences: ["vegetarian"],
   allergies: [],
 };
 
 describe("demo-catalog-cart", () => {
-  test("demoRestaurantFromCriteria returns FastTab Demo Bakery", () => {
+  test("demoRestaurantFromCriteria returns Nari Thai Kitchen", () => {
     const restaurant = demoRestaurantFromCriteria(criteria);
 
-    expect(restaurant.name).toBe("FastTab Demo Bakery");
+    expect(restaurant.name).toBe("Nari Thai Kitchen");
     expect(restaurant.address).toContain("506 20th St");
+    expect(restaurant.reason).not.toContain("demo");
   });
 
-  test("buildDemoCatalogCart uses cookie SKUs and demo blocker note", () => {
+  test("buildDemoCatalogCart uses Thai SKUs and internal stub marker", () => {
     const restaurant = demoRestaurantFromCriteria(criteria);
     const cart = buildDemoCatalogCart(criteria, restaurant);
 
     expect(cart.status).toBe("draft");
     expect(cart.items).toHaveLength(2);
-    expect(cart.estimatedTotal?.cents).toBe(449 + 549);
-    expect(cart.blockers).toEqual([DEMO_CATALOG_CART_NOTE]);
+    expect(cart.estimatedTotal?.cents).toBe(1695 + 1795);
+    expect(cart.blockers).toEqual([DEMO_CATALOG_CART_MARKER]);
     expect(isDemoCatalogCart(cart)).toBe(true);
+    expect(cart.items[0]?.name).toBe("Pad Thai");
   });
 });

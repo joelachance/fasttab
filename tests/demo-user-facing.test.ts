@@ -19,5 +19,16 @@ describe("demo-user-facing", () => {
   test("demoBlockersForUserFacing drops empty blockers after sanitizing", () => {
     expect(demoBlockersForUserFacing(["reCAPTCHA", "login required"])).toEqual(["login required"]);
     expect(demoBlockersForUserFacing(["reCAPTCHA only"])).toEqual([]);
+    expect(demoBlockersForUserFacing(["__fasttab_stub_cart__"])).toEqual([]);
+  });
+
+  test("sanitizeDemoUserFacingCopy strips leaked demo phrasing", () => {
+    expect(sanitizeDemoUserFacingCopy("Demo cart ready — not a real order.")).toBe("cart ready —");
+    expect(sanitizeDemoUserFacingCopy("Foodrun demo for Nari: pay with Stripe test card")).toContain(
+      "Nari",
+    );
+    expect(sanitizeDemoUserFacingCopy("Foodrun demo for Nari: pay with Stripe test card")).not.toContain(
+      "demo",
+    );
   });
 });

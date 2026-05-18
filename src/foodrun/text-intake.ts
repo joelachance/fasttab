@@ -1,3 +1,10 @@
+import {
+  runDemoCheckoutAndSplitPipeline,
+  runDemoRestaurantAndCartPipeline,
+  type FoodrunJobNotifier,
+  type FoodrunJobStore,
+  type FoodrunStripe,
+} from "./job-worker.js";
 import { OrderSessionStore } from "./order-session-store.js";
 import type { ConfirmedPreferences, FoodrunOrderState } from "./order-state.js";
 import type { Env } from "../env.js";
@@ -40,13 +47,20 @@ export type FoodrunTextStore = Pick<
 
 export type FoodrunPreferenceMemory = SupermemoryMemory;
 
+export type FoodrunTextIntakeOptions = {
+  store?: FoodrunTextStore;
+  memory?: FoodrunPreferenceMemory | null;
+  env?: Env;
+  /** When set, demo cart/checkout run inline in this handler instead of the job queue. */
+  runDemoPipelineInline?: boolean;
+  jobStore?: FoodrunJobStore;
+  notifier?: FoodrunJobNotifier | null;
+  stripe?: FoodrunStripe;
+};
+
 export async function handleFoodrunTextMessage(
   input: FoodrunTextMessage,
-  options: {
-    store?: FoodrunTextStore;
-    memory?: FoodrunPreferenceMemory | null;
-    env?: Env;
-  } = {},
+  options: FoodrunTextIntakeOptions = {},
 ): Promise<FoodrunTextIntakeResult> {
   const result = await handleFoodrunTextMessageCore(input, options);
 
@@ -59,11 +73,7 @@ export async function handleFoodrunTextMessage(
 
 async function handleFoodrunTextMessageCore(
   input: FoodrunTextMessage,
-  options: {
-    store?: FoodrunTextStore;
-    memory?: FoodrunPreferenceMemory | null;
-    env?: Env;
-  } = {},
+  options: FoodrunTextIntakeOptions = {},
 ): Promise<FoodrunTextIntakeResult> {
   const store = options.store ?? new OrderSessionStore();
   const extracted = extractPreferenceFacts(input.body);
@@ -80,7 +90,7 @@ async function handleFoodrunTextMessageCore(
     throw new Error(`Order session missing after create: ${input.roomId}`);
   }
 
-  const memory = options.memory ?? createMemory(options.env);
+  const memory = isDemoMode(options.env) ? null : (options.memory ?? createMemory(options.env));
   let preferences = mergePreferences(session.confirmedPreferences, extracted);
   const supermemoryContext = await hydrateSupermemoryContext(
     input,
@@ -88,6 +98,7 @@ async function handleFoodrunTextMessageCore(
     preferences,
     store,
     memory,
+    options.env,
   );
   preferences = mergeSupermemoryIntoPreferences(preferences, supermemoryContext);
   await store.upsertParticipant({
@@ -110,6 +121,16 @@ async function handleFoodrunTextMessageCore(
 
   if (canRetryCart(session, input.body)) {
     await store.updateOrderSession(input.roomId, { state: "building_cart" });
+
+    if (await runDemoPipelineIfEnabled(input, options, "cart")) {
+      return {
+        reply:
+          "Status: retrying cart. I'll text you when the draft cart is ready, or if checkout blocks me.",
+        state: "confirming_cart",
+        extracted,
+      };
+    }
+
     await store.enqueueJob({
       roomId: input.roomId,
       kind: "cart_build",
@@ -118,9 +139,7 @@ async function handleFoodrunTextMessageCore(
 
     return {
       reply:
-        isDemoMode(options.env) ?
-          "Retrying demo cart — I'll text when the draft is ready."
-        : "Status: retrying cart. I'll text you when the draft cart is ready, or if checkout blocks me.",
+        "Status: retrying cart. I'll text you when the draft cart is ready, or if checkout blocks me.",
       state: "building_cart",
       extracted,
     };
@@ -129,9 +148,7 @@ async function handleFoodrunTextMessageCore(
   if (isBusy(session.state)) {
     return {
       reply:
-        isDemoMode(options.env) ?
-          "Still working — I'll text when this step finishes."
-        : "Status: still working. I'll text you when this FastTab step finishes or needs input.",
+        "Status: still working. I'll text you when this FastTab step finishes or needs input.",
       state: session.state,
       extracted,
     };
@@ -154,6 +171,15 @@ async function handleFoodrunTextMessageCore(
       browserUseSessionId: null,
       browserUseLiveUrl: null,
     });
+    if (await runDemoPipelineIfEnabled(input, options, "cart")) {
+      return {
+        reply:
+          "Status: trying another option. I'll check the next restaurant is open and can add to cart, then send it for approval.",
+        state: "confirming_cart",
+        extracted,
+      };
+    }
+
     await store.enqueueJob({
       roomId: input.roomId,
       kind: "restaurant_search",
@@ -205,6 +231,15 @@ async function handleFoodrunTextMessageCore(
     }
 
     await store.updateOrderSession(input.roomId, { state: "issuing_card" });
+
+    if (await runDemoPipelineIfEnabled(input, options, "checkout")) {
+      return {
+        reply: "Status: order placed. Split links are in your texts.",
+        state: "complete",
+        extracted,
+      };
+    }
+
     await store.enqueueJob({
       roomId: input.roomId,
       kind: "checkout_payment",
@@ -212,12 +247,7 @@ async function handleFoodrunTextMessageCore(
     });
 
     return {
-      reply:
-        isDemoMode(options.env) ?
-          "Running demo checkout (no real order). I'll text split links shortly."
-        : shouldPlaceLiveOrders(options.env) ?
-          "Status: preparing checkout. I'll place the order on the restaurant site with a virtual card and text you when it's done."
-        : "Status: preparing checkout. Test mode will not place a real order.",
+      reply: formatCheckoutStartedReply(options.env),
       state: "issuing_card",
       extracted,
     };
@@ -236,6 +266,16 @@ async function handleFoodrunTextMessageCore(
       state: "searching_restaurants",
       confirmedPreferences: preferences,
     });
+
+    if (await runDemoPipelineIfEnabled(input, options, "cart")) {
+      return {
+        reply:
+          "Status: searching restaurants. I'll text you when I find a match and start the cart.",
+        state: "confirming_cart",
+        extracted: preferences,
+      };
+    }
+
     await store.enqueueJob({
       roomId: input.roomId,
       kind: "restaurant_search",
@@ -359,35 +399,42 @@ export function extractPreferenceFacts(text: string): ConfirmedPreferences {
 
 export function formatPreferenceConfirmation(
   preferences: ConfirmedPreferences,
-  env: Env = process.env,
+  _env: Env = process.env,
 ): string {
   const facts = preferenceLines(preferences);
-  const demo = isDemoMode(env);
 
   if (facts.length === 0) {
-    return demo ?
-        "FastTab demo. Text what you want and where — e.g. cookies to 506 20th St."
-      : "Hi, this is your FastTab agent. What would you like to order?";
+    return "Hi, this is your FastTab agent. What would you like to order?";
   }
 
   if (!hasOrderLocation(preferences)) {
     return [
-      demo ? "FastTab demo (not a real order). I have:" : "Hi, this is your FastTab agent. I have:",
+      "Hi, this is your FastTab agent. I have:",
       ...facts.map((fact) => `- ${fact}`),
       "",
-      demo ?
-        "Send an address, then reply yes. Example: cookies to 506 20th St."
-      : "Send a delivery address or neighborhood, then reply yes to search.",
-      ...(demo ? [] : ["Example: Insomnia Cookies delivery to 506 20th St, San Francisco."]),
+      "Send a delivery address or neighborhood, then reply yes to search.",
+      "Example: Thai delivery to 506 20th St, San Francisco.",
     ].join("\n");
   }
 
   return [
-    demo ? "FastTab demo (not a real order). I have:" : "Hi, this is your FastTab agent. I have:",
+    "Hi, this is your FastTab agent. I have:",
     ...facts.map((fact) => `- ${fact}`),
     "",
-    demo ? "Reply yes to build your demo cart, or send changes." : "Reply yes to search restaurants, or send changes.",
+    "Reply yes to search restaurants, or send changes.",
   ].join("\n");
+}
+
+function formatCheckoutStartedReply(env: Env = process.env): string {
+  if (isDemoMode(env)) {
+    return "Status: preparing checkout. I'll text you when it's done.";
+  }
+
+  if (shouldPlaceLiveOrders(env)) {
+    return "Status: preparing checkout. I'll place the order on the restaurant site with a virtual card and text you when it's done.";
+  }
+
+  return "Status: preparing checkout. Test mode will not place a real order.";
 }
 
 function formatMissingLocationReply(preferences: ConfirmedPreferences): string {
@@ -439,13 +486,49 @@ function createMemory(env: Env = process.env): FoodrunPreferenceMemory | null {
   return createSupermemoryMemory(env);
 }
 
+async function runDemoPipelineIfEnabled(
+  input: FoodrunTextMessage,
+  options: FoodrunTextIntakeOptions,
+  step: "cart" | "checkout",
+): Promise<boolean> {
+  if (!isDemoMode(options.env)) {
+    return false;
+  }
+
+  if (options.runDemoPipelineInline === false) {
+    return false;
+  }
+
+  const payload = jobPayload(input);
+  const pipelineOptions = {
+    store: options.jobStore ?? (options.store as FoodrunJobStore | undefined),
+    notifier: options.notifier,
+    stripe: options.stripe,
+    env: options.env,
+    memory: null,
+  };
+
+  if (step === "checkout") {
+    await runDemoCheckoutAndSplitPipeline(input.roomId, payload, pipelineOptions);
+    return true;
+  }
+
+  await runDemoRestaurantAndCartPipeline(input.roomId, payload, pipelineOptions);
+  return true;
+}
+
 async function hydrateSupermemoryContext(
   input: FoodrunTextMessage,
   session: { roomId: string; supermemoryContext: unknown[]; confirmedPreferences: ConfirmedPreferences },
   preferences: ConfirmedPreferences,
   store: FoodrunTextStore,
   memory: SupermemoryReader | null,
+  env: Env = process.env,
 ): Promise<unknown[]> {
+  if (isDemoMode(env)) {
+    return session.supermemoryContext;
+  }
+
   if (session.supermemoryContext.length > 0) {
     return session.supermemoryContext;
   }

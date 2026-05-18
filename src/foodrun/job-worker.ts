@@ -225,26 +225,7 @@ async function searchRestaurants(
   }
 
   if (shouldUseDemoRestaurantPipeline(options.env)) {
-    const participants = await options.store.listParticipants(job.roomId);
-    const criteria = buildOrderCriteria(session, participants, undefined, options.env);
-    const restaurant = demoRestaurantFromCriteria(criteria);
-
-    await options.store.updateOrderSession(job.roomId, {
-      state: "building_cart",
-      selectedRestaurant: restaurant,
-      browserUseSessionId: null,
-      browserUseLiveUrl: null,
-    });
-    await options.store.appendEvent({
-      roomId: job.roomId,
-      eventType: "demo_restaurant_selected",
-      payload: { restaurant },
-    });
-    await options.store.enqueueJob({
-      roomId: job.roomId,
-      kind: "cart_build",
-      payload: job.payload,
-    });
+    await runDemoRestaurantAndCart(job, options);
     return;
   }
 
@@ -638,6 +619,11 @@ async function completeDryRunCheckout(
       },
     },
   });
+  if (demoCheckout) {
+    await createPostOrderSplits(job, options);
+    return;
+  }
+
   await options.store.enqueueJob({
     roomId: job.roomId,
     kind: "post_order_split",
@@ -698,12 +684,135 @@ async function createPostOrderSplits(
   }
 }
 
+/** Hackathon demo: restaurant pick + catalog cart in one step (no cron chain). */
+export async function runDemoRestaurantAndCartPipeline(
+  roomId: string,
+  payload: Record<string, unknown>,
+  options: ProcessFoodrunJobsOptions = {},
+): Promise<void> {
+  const store = options.store ?? new OrderSessionStore();
+  await runDemoRestaurantAndCart(demoInlineJob(roomId, "restaurant_search", payload), {
+    ...options,
+    store,
+  });
+}
+
+/** Hackathon demo: dry-run checkout + Stripe split links without job queue waits. */
+export async function runDemoCheckoutAndSplitPipeline(
+  roomId: string,
+  payload: Record<string, unknown>,
+  options: ProcessFoodrunJobsOptions = {},
+): Promise<void> {
+  const store = options.store ?? new OrderSessionStore();
+  const job = demoInlineJob(roomId, "checkout_payment", payload);
+  const session = await getSession(store, roomId);
+  const totalCents = cartTotalCents(session.cart);
+
+  if (!session.cart || !session.selectedRestaurant || !totalCents) {
+    throw new Error("Demo checkout requires a selected restaurant and cart total");
+  }
+
+  await completeDryRunCheckout(job, { ...options, store }, session, totalCents);
+}
+
+function demoInlineJob(
+  roomId: string,
+  kind: FoodrunJobKind,
+  payload: Record<string, unknown>,
+): FoodrunJob {
+  return {
+    jobId: `demo_inline_${kind}_${roomId}`,
+    roomId,
+    kind,
+    status: "running",
+    attempts: 0,
+    runAfter: new Date(),
+    payload,
+  };
+}
+
+async function runDemoRestaurantAndCart(
+  job: FoodrunJob,
+  options: ProcessFoodrunJobsOptions & { store: FoodrunJobStore },
+): Promise<void> {
+  const session = await getSession(options.store, job.roomId);
+
+  const existingCartStatus =
+    session.cart && typeof session.cart === "object" && "status" in session.cart ?
+      String((session.cart as { status?: unknown }).status)
+    : undefined;
+
+  if (session.cart && session.selectedRestaurant && existingCartStatus !== "blocked") {
+    return;
+  }
+
+  const participants = await options.store.listParticipants(job.roomId);
+  const criteria = buildOrderCriteria(session, participants, undefined, options.env);
+  const restaurant = session.selectedRestaurant ?? demoRestaurantFromCriteria(criteria);
+
+  if (!session.selectedRestaurant) {
+    await options.store.updateOrderSession(job.roomId, {
+      state: "building_cart",
+      selectedRestaurant: restaurant,
+      browserUseSessionId: null,
+      browserUseLiveUrl: null,
+    });
+    await options.store.appendEvent({
+      roomId: job.roomId,
+      eventType: "demo_restaurant_selected",
+      payload: { restaurant },
+    });
+  }
+
+  const browser =
+    options.browser ??
+    ({
+      searchRestaurants: async () => {
+        throw new Error("Browser Use search is unavailable in demo mode");
+      },
+      buildCart: async () => {
+        throw new Error("Browser Use cart build is unavailable in demo mode");
+      },
+    } satisfies FoodrunBrowserUse);
+
+  const cart = await buildCartWithFallback(
+    browser,
+    criteria,
+    restaurant,
+    browserOptions(options.env, session),
+    options.env,
+  );
+
+  await options.store.updateOrderSession(job.roomId, {
+    state: "confirming_cart",
+    cart: cart.output,
+    browserUseSessionId: cart.sessionId,
+    browserUseLiveUrl: cart.liveUrl,
+  });
+  await options.store.appendEvent({
+    roomId: job.roomId,
+    eventType: "browser_use_cart_ready",
+    payload: {
+      restaurant,
+      cart: cart.output,
+      browserUseSessionId: cart.sessionId,
+      browserUseLiveUrl: cart.liveUrl,
+      demoInline: true,
+    },
+  });
+  await notify(job, options, formatCartReadyText(restaurant, cart.output, options.env));
+}
+
 async function ensureSupermemoryContext(
   job: FoodrunJob,
   session: FoodrunOrderSession,
   participants: FoodrunParticipant[],
   options: ProcessFoodrunJobsOptions & { store: FoodrunJobStore },
 ): Promise<void> {
+  if (isDemoMode(options.env)) {
+    return;
+  }
+
   if (session.supermemoryContext.length > 0) {
     return;
   }
@@ -1053,10 +1162,6 @@ function formatCartReadyText(
   cart: CartSummary,
   env: Env = process.env,
 ): string {
-  if (isDemoMode(env)) {
-    return formatDemoCartReadyText(restaurant, cart);
-  }
-
   const total = cartTotalCents(cart);
   const totalLine = total ? ` Estimated total: $${(total / 100).toFixed(2)}.` : "";
   const items = cart.items
@@ -1082,33 +1187,6 @@ function formatCartReadyText(
     cart.status === "blocked" ?
       "Reply 'retry cart' to try again, or send a different restaurant or preference."
     : "Reply 'confirm order' to approve this option, 'no' to try another restaurant, or send changes.",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-function formatDemoCartReadyText(restaurant: RestaurantOption, cart: CartSummary): string {
-  const total = cartTotalCents(cart);
-  const totalPart = total ? ` ~$${(total / 100).toFixed(2)}` : "";
-  const items = cart.items
-    .slice(0, 5)
-    .map((item) => `${item.quantity}x ${item.name}`)
-    .join(", ");
-
-  if (cart.status === "blocked") {
-    return [
-      `Demo cart blocked at ${restaurant.name}${totalPart}. Not a real order.`,
-      items ? `Items: ${items}` : "",
-      "Reply retry cart or send changes.",
-    ]
-      .filter(Boolean)
-      .join("\n");
-  }
-
-  return [
-    `Demo cart ready — ${restaurant.name}${totalPart}. Not a real order.`,
-    items ? `Items: ${items}` : "",
-    "Reply confirm order, no, or changes.",
   ]
     .filter(Boolean)
     .join("\n");

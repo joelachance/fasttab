@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { formatPaymentLinkSms } from "../src/foodrun/collect-splits";
 
 describe("collect splits", () => {
-  test("formatPaymentLinkSms includes amount, url, restaurant, and test card hint", () => {
+  test("formatPaymentLinkSms includes amount, url, and restaurant", () => {
     const body = formatPaymentLinkSms(
       {
         participantId: "guest-1",
@@ -11,12 +11,13 @@ describe("collect splits", () => {
         amountCents: 4609,
         url: "https://buy.stripe.com/test_123",
       },
-      "Demo Thai",
+      "Nari Thai Kitchen",
     );
 
     expect(body).toContain("$46.09");
     expect(body).toContain("https://buy.stripe.com/test_123");
-    expect(body).toContain("Demo Thai");
-    expect(body).toContain("test card");
+    expect(body).toContain("Nari Thai Kitchen");
+    expect(body.toLowerCase()).not.toContain("demo");
+    expect(body.toLowerCase()).not.toContain("test card");
   });
 });
