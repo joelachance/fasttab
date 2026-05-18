@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildCartFromLineItems,
   buildInsomniaCatalogCart,
+  INSOMNIA_DEFAULT_LINE_ITEMS,
   insomniaCatalogCartEnabled,
   INSOMNIA_CATALOG_CART_NOTE,
   isInsomniaBrand,
@@ -61,6 +63,19 @@ describe("insomnia-catalog-cart", () => {
     expect(cart.estimatedTotal?.cents).toBe(449 + 549 + 449);
     expect(cart.blockers).toEqual([INSOMNIA_CATALOG_CART_NOTE]);
     expect(isInsomniaCatalogCart(cart)).toBe(true);
+  });
+
+  test("buildCartFromLineItems uses fixed SKU quantities from INSOMNIA_DEFAULT_LINE_ITEMS", () => {
+    const cart = buildCartFromLineItems(criteria, restaurant, INSOMNIA_DEFAULT_LINE_ITEMS);
+
+    expect(cart.items).toHaveLength(4);
+    expect(cart.items.map((item) => ({ name: item.name, quantity: item.quantity }))).toEqual([
+      { name: "Chocolate Chunk", quantity: 3 },
+      { name: "Cookies 'N Cream", quantity: 3 },
+      { name: "Classic with M&M'S", quantity: 3 },
+      { name: "Vegan Chocolate Chunk", quantity: 3 },
+    ]);
+    expect(cart.estimatedTotal?.cents).toBe(449 * 12);
   });
 
   test("insomniaCatalogCartEnabled defaults to true", () => {

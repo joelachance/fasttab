@@ -4,7 +4,9 @@
  * Usage:
  *   bun run order:insomnia-catalog
  *   bun run order:insomnia-catalog -- --phone +15551234567
- *   bun run order:insomnia-catalog -- --address "560 20th St, San Francisco, CA" --items 6
+ *   bun run order:insomnia-catalog -- --address "560 20th St, San Francisco, CA"
+ *   bun run order:insomnia-catalog -- --preset default
+ *   bun run order:insomnia-catalog -- --preset rotate --items 6
  *   bun run order:insomnia-catalog -- --sponge
  *
  * Env (.env.local via env helpers):
@@ -24,7 +26,9 @@ import { SpongePlatform } from "@paysponge/sdk";
 import { envWithDefault, envWithDotenvLocalOverrides, requiredEnv } from "../src/env.js";
 import { normalizePhone } from "../src/foodrun/customer-phone.js";
 import {
+  buildCartFromLineItems,
   buildInsomniaCatalogCart,
+  INSOMNIA_DEFAULT_LINE_ITEMS,
   insomniaCatalogCartEnabled,
   INSOMNIA_CATALOG_CART_NOTE,
 } from "../src/modules/insomnia-catalog-cart.js";
@@ -38,7 +42,7 @@ import {
 import type { CartSummary, OrderCriteria, RestaurantOption } from "../src/types.js";
 
 const DEFAULT_ADDRESS = "560 20th St, San Francisco, CA";
-const DEFAULT_ITEM_COUNT = 3;
+const DEFAULT_ROTATE_ITEM_COUNT = 3;
 const INSOMNIA_RESTAURANT: RestaurantOption = {
   name: "Insomnia Cookies",
   orderingUrl: "https://insomniacookies.com/",
@@ -50,19 +54,23 @@ const INSOMNIA_RESTAURANT: RestaurantOption = {
 const SPONGE_AGENT_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+type Preset = "default" | "rotate";
+
 type CliOptions = {
   phone?: string;
   address: string;
-  items: number;
+  preset: Preset;
+  rotateItems: number;
   sponge: boolean;
 };
 
 function usage(): never {
-  console.error(`Usage: bun run order:insomnia-catalog [--phone E164] [--address "…"] [--items N] [--sponge]
+  console.error(`Usage: bun run order:insomnia-catalog [--phone E164] [--address "…"] [--preset default|rotate] [--items N] [--sponge]
 
   --phone     Customer delivery phone (E.164). Default: FOODRUN_DELIVERY_PHONE from .env.local
   --address   Delivery address. Default: ${DEFAULT_ADDRESS}
-  --items     Cookie line count (1–12). Default: ${DEFAULT_ITEM_COUNT}
+  --preset    default: 4 SKUs × 3 each (12 cookies). rotate: cycle menu SKUs (see --items)
+  --items     Cookie line count for rotate preset only (1–12). Default: ${DEFAULT_ROTATE_ITEM_COUNT}
   --sponge    Fetch Sponge checkout card from .env.local and include masked card details
 `);
   process.exit(1);
@@ -71,7 +79,8 @@ function usage(): never {
 function parseArgs(argv: string[]): CliOptions {
   let phone: string | undefined;
   let address = DEFAULT_ADDRESS;
-  let items = DEFAULT_ITEM_COUNT;
+  let preset: Preset = "default";
+  let rotateItems = DEFAULT_ROTATE_ITEM_COUNT;
   let sponge = false;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -87,10 +96,20 @@ function parseArgs(argv: string[]): CliOptions {
       index += 1;
       continue;
     }
+    if (arg === "--preset") {
+      const raw = argv[index + 1] ?? usage();
+      if (raw !== "default" && raw !== "rotate") {
+        console.error("--preset must be default or rotate");
+        usage();
+      }
+      preset = raw;
+      index += 1;
+      continue;
+    }
     if (arg === "--items") {
       const raw = argv[index + 1] ?? usage();
-      items = Number.parseInt(raw, 10);
-      if (!Number.isFinite(items) || items < 1 || items > 12) {
+      rotateItems = Number.parseInt(raw, 10);
+      if (!Number.isFinite(rotateItems) || rotateItems < 1 || rotateItems > 12) {
         console.error("--items must be an integer from 1 to 12");
         usage();
       }
@@ -110,7 +129,7 @@ function parseArgs(argv: string[]): CliOptions {
     }
   }
 
-  return { phone, address, items, sponge };
+  return { phone, address, preset, rotateItems, sponge };
 }
 
 async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
@@ -197,6 +216,11 @@ function buildCriteria(options: CliOptions, env: NodeJS.ProcessEnv): OrderCriter
     process.exit(1);
   }
 
+  const participantCount =
+    options.preset === "default" ?
+      INSOMNIA_DEFAULT_LINE_ITEMS.reduce((sum, line) => sum + line.quantity, 0)
+    : options.rotateItems;
+
   return {
     roomId: "insomnia_catalog_cli",
     location: {
@@ -205,11 +229,19 @@ function buildCriteria(options: CliOptions, env: NodeJS.ProcessEnv): OrderCriter
     },
     cuisine: "Insomnia Cookies",
     pickupOrDelivery: "delivery",
-    participantCount: options.items,
+    participantCount,
     preferences: ["Insomnia Cookies"],
     allergies: [],
     deliveryPhone,
   };
+}
+
+function buildCart(criteria: OrderCriteria, options: CliOptions): CartSummary {
+  if (options.preset === "default") {
+    return buildCartFromLineItems(criteria, INSOMNIA_RESTAURANT, INSOMNIA_DEFAULT_LINE_ITEMS);
+  }
+
+  return buildInsomniaCatalogCart(criteria, INSOMNIA_RESTAURANT);
 }
 
 async function main(): Promise<void> {
@@ -222,9 +254,10 @@ async function main(): Promise<void> {
   }
 
   const criteria = buildCriteria(cli, env);
-  const cart = buildInsomniaCatalogCart(criteria, INSOMNIA_RESTAURANT);
+  const cart = buildCart(criteria, cli);
   const lineItems = lineItemsFromCart(cart);
   const totalCents = cart.estimatedTotal?.cents ?? cart.subtotal?.cents;
+  const cookieCount = lineItems.reduce((sum, item) => sum + item.quantity, 0);
 
   let spongeCard: ReturnType<typeof maskedSpongeCard> | undefined;
 
@@ -243,6 +276,7 @@ async function main(): Promise<void> {
 
   const payload = {
     catalogNote: INSOMNIA_CATALOG_CART_NOTE,
+    preset: cli.preset,
     deliveryAddress: criteria.location.placeName ?? criteria.location.raw,
     deliveryPhone: criteria.deliveryPhone,
     checkoutUrl: cart.checkoutUrl,
@@ -260,10 +294,11 @@ async function main(): Promise<void> {
 
   console.error("");
   console.error("Insomnia catalog cart ready");
+  console.error(`  Preset: ${cli.preset}`);
   console.error(`  Checkout: ${cart.checkoutUrl}`);
   console.error(`  Deliver to: ${payload.deliveryAddress}`);
   console.error(`  Phone: ${payload.deliveryPhone}`);
-  console.error(`  Items: ${lineItems.length} cookies, total ${payload.totalUsd ?? "n/a"}`);
+  console.error(`  Items: ${cookieCount} cookies (${lineItems.length} SKUs), total ${payload.totalUsd ?? "n/a"}`);
   for (const item of lineItems) {
     console.error(`    - ${item.quantity}x ${item.name} @ ${item.unitPriceUsd ?? "?"}`);
   }
