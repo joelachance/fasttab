@@ -773,6 +773,9 @@ async function runDemoRestaurantAndCart(
       buildCart: async () => {
         throw new Error("Browser Use cart build is unavailable in demo mode");
       },
+      completeCheckout: async () => {
+        throw new Error("Browser Use checkout is unavailable in demo mode");
+      },
     } satisfies FoodrunBrowserUse);
 
   const cart = await buildCartWithFallback(
