@@ -33,6 +33,7 @@ import type {
   FoodrunParticipant,
 } from "./order-state.js";
 import { resolveCustomerDeliveryPhone } from "./customer-phone.js";
+import { demoBlockersForUserFacing, sanitizeDemoUserFacingCopy } from "./demo-user-facing.js";
 import {
   isDemoMode,
   shouldPlaceLiveOrders,
@@ -380,7 +381,11 @@ async function buildCart(
       browserUseLiveUrl: cart.liveUrl,
     },
   });
-  await notify(job, options, formatCartReadyText(session.selectedRestaurant, cart.output));
+  await notify(
+    job,
+    options,
+    formatCartReadyText(session.selectedRestaurant, cart.output, options.env),
+  );
 }
 
 async function editCart(
@@ -417,7 +422,11 @@ async function editCart(
     eventType: "browser_use_cart_edited",
     payload: { editText: stringPayload(job, "editText"), cart: cart.output },
   });
-  await notify(job, options, formatCartReadyText(session.selectedRestaurant, cart.output));
+  await notify(
+    job,
+    options,
+    formatCartReadyText(session.selectedRestaurant, cart.output, options.env),
+  );
 }
 
 /** Last four digits only — safe for logs and user-facing errors. */
@@ -880,10 +889,10 @@ async function buildCartWithFallback(
     if (cart.output.status === "blocked" && cart.output.items.length === 0) {
       return {
         ...cart,
-        output: buildInternalDraftCart(criteria, restaurant, cart.output.blockers),
+        output: buildInternalDraftCart(criteria, restaurant, cart.output.blockers, env),
         raw: {
           ...cart.raw,
-          output: buildInternalDraftCart(criteria, restaurant, cart.output.blockers),
+          output: buildInternalDraftCart(criteria, restaurant, cart.output.blockers, env),
         },
       };
     }
@@ -891,7 +900,7 @@ async function buildCartWithFallback(
     return cart;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const output = buildInternalDraftCart(criteria, restaurant, [message]);
+    const output = buildInternalDraftCart(criteria, restaurant, [message], env);
 
     return {
       sessionId: "internal_draft_cart",
@@ -908,6 +917,7 @@ function buildInternalDraftCart(
   criteria: OrderCriteria,
   restaurant: RestaurantOption,
   blockers: string[],
+  env: Env = process.env,
 ): CartSummary {
   const itemCount = Math.max(1, Math.min(criteria.participantCount, 4));
   const priceCents =
@@ -934,7 +944,9 @@ function buildInternalDraftCart(
     status: "draft",
     blockers: [
       "Browser Use could not create a checkout-ready website cart, so FastTab built an internal draft cart.",
-      ...blockers.map(formatFailureReason),
+      ...(isDemoMode(env) ?
+        demoBlockersForUserFacing(blockers)
+      : blockers.map(formatFailureReason)),
     ],
   };
 }
@@ -1040,7 +1052,11 @@ function formatCartForPrompt(cart: CartSummary): string {
     .join(", ");
 }
 
-function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): string {
+function formatCartReadyText(
+  restaurant: RestaurantOption,
+  cart: CartSummary,
+  env: Env = process.env,
+): string {
   const total = cartTotalCents(cart);
   const totalLine = total ? ` Estimated total: $${(total / 100).toFixed(2)}.` : "";
   const items = cart.items
@@ -1052,7 +1068,7 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
     : cart.status === "draft" ? "Status: draft cart ready."
     : "Status: checkout-ready cart.";
 
-  const blockerLine = formatCartBlockerLine(cart);
+  const blockerLine = formatCartBlockerLine(cart, env);
 
   return [
     statusLine,
@@ -1073,16 +1089,23 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
     .join("\n");
 }
 
-function formatCartBlockerLine(cart: CartSummary): string {
+function formatCartBlockerLine(cart: CartSummary, env: Env = process.env): string {
   if (isDemoCatalogCart(cart) || isInsomniaCatalogCart(cart)) {
     return cart.blockers[0] ?? "";
   }
 
-  if (cart.blockers.length) {
-    return `Blocked by: ${cart.blockers.join(", ")}`;
+  const blockers =
+    isDemoMode(env) ? demoBlockersForUserFacing(cart.blockers) : cart.blockers;
+
+  if (!blockers.length) {
+    return "";
   }
 
-  return "";
+  if (isDemoMode(env)) {
+    return blockers.join(". ");
+  }
+
+  return `Blocked by: ${blockers.join(", ")}`;
 }
 
 function formatRestaurantFoundText(restaurant: RestaurantOption): string {
@@ -1139,10 +1162,13 @@ async function notify(
     return;
   }
 
+  const outboundBody =
+    isDemoMode(options.env) ? sanitizeDemoUserFacingCopy(body) : body;
+
   await notifier.sendText({
     agentId,
     toNumber,
-    body,
+    body: outboundBody,
     numberId: stringPayload(job, "agentNumberId"),
   });
 }

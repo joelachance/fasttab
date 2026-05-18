@@ -1,6 +1,7 @@
 import { OrderSessionStore } from "./order-session-store.js";
 import type { ConfirmedPreferences, FoodrunOrderState } from "./order-state.js";
 import type { Env } from "../env.js";
+import { sanitizeDemoUserFacingCopy } from "./demo-user-facing.js";
 import {
   isDemoFromStart,
   isDemoMode,
@@ -44,6 +45,23 @@ export type FoodrunTextStore = Pick<
 export type FoodrunPreferenceMemory = SupermemoryMemory;
 
 export async function handleFoodrunTextMessage(
+  input: FoodrunTextMessage,
+  options: {
+    store?: FoodrunTextStore;
+    memory?: FoodrunPreferenceMemory | null;
+    env?: Env;
+  } = {},
+): Promise<FoodrunTextIntakeResult> {
+  const result = await handleFoodrunTextMessageCore(input, options);
+
+  if (!isDemoMode(options.env)) {
+    return result;
+  }
+
+  return { ...result, reply: sanitizeDemoUserFacingCopy(result.reply) };
+}
+
+async function handleFoodrunTextMessageCore(
   input: FoodrunTextMessage,
   options: {
     store?: FoodrunTextStore;

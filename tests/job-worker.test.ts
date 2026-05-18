@@ -503,6 +503,59 @@ describe("processFoodrunJobs", () => {
     expect(update?.browserUseSessionId).toBe("demo_catalog_cart");
     expect(update?.cart?.items[0]?.name).toBe("Classic Chocolate Chunk");
     expect(String((sent[0] as { body: string }).body)).toContain("not a real order");
+    expect(String((sent[0] as { body: string }).body).toLowerCase()).not.toContain("captcha");
+  });
+
+  test("demo mode strips captcha from cart-ready SMS blockers", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "building_cart",
+      confirmedPreferences: {
+        cuisines: ["Thai"],
+        location: "Mission",
+      },
+      selectedRestaurant: {
+        name: "Mission Thai",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: [],
+      },
+    };
+    const { store } = createStore({ jobs: [job({ kind: "cart_build" })], session });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run");
+      },
+      buildCart: async () => ({
+        sessionId: BROWSER_CART_SESSION_ID,
+        output: {
+          restaurantName: "Mission Thai",
+          checkoutUrl: "https://example.com/order",
+          items: [{ name: "Pad Thai", quantity: 1, price: { currency: "usd", cents: 1800 } }],
+          screenshots: [],
+          status: "draft",
+          blockers: ["reCAPTCHA blocked checkout", "login required"],
+        },
+        raw: {},
+      }),
+    };
+    const sent: unknown[] = [];
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await processFoodrunJobs(1, {
+      store,
+      browser,
+      notifier,
+      env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "dry_run" },
+    });
+
+    const body = String((sent[0] as { body: string }).body).toLowerCase();
+    expect(body).not.toContain("captcha");
+    expect(body).toContain("login required");
   });
 
   test("notifies requester when restaurant search is missing a delivery area", async () => {
