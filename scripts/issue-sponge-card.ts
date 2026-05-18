@@ -52,12 +52,7 @@ const SPONGE_AGENT_UUID_RE =
 async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
   const apiKey = requiredEnv(env, "SPONGE_API_KEY");
 
-  const usePlatformAgent =
-    apiKey.startsWith("sponge_master") ||
-    Boolean(env.SPONGE_AGENT_ID?.trim()) ||
-    Boolean(env.SPONGE_AGENT_NAME?.trim());
-
-  if (!usePlatformAgent) {
+  if (!apiKey.startsWith("sponge_master")) {
     return;
   }
 

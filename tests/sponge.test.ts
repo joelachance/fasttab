@@ -113,6 +113,40 @@ describe("SpongeModule", () => {
     ]);
   });
 
+  test("connects directly when agent key is set even if SPONGE_AGENT_ID is present", async () => {
+    const connectCalls: unknown[] = [];
+    const module = new SpongeModule(
+      {
+        SPONGE_API_KEY: "sponge_live_123",
+        SPONGE_API_BASE: "https://api.test.paysponge.com",
+        SPONGE_AGENT_ID: "8338cfc8-49e6-46f1-a7d4-218b1a17e31b",
+        SPONGE_AGENT_NAME: "Fasttab Foodrun Agent",
+      },
+      undefined,
+      async (options) => {
+        connectCalls.push(options);
+        return fakeWallet(async () => ({ cardId: "card_direct" }));
+      },
+      async () => {
+        throw new Error("SpongePlatform.connect should not be called for agent keys");
+      },
+    );
+
+    await module.issueFoodOrderCard({
+      amountUsd: "10",
+      merchantName: "Demo Burgers",
+      merchantUrl: "https://demo-burgers.example.com",
+    });
+
+    expect(connectCalls).toEqual([
+      {
+        apiKey: "sponge_live_123",
+        baseUrl: "https://api.test.paysponge.com",
+        noBrowser: true,
+      },
+    ]);
+  });
+
   test("uses SpongePlatform when SPONGE_API_KEY is a master key", async () => {
     const platformCalls: unknown[] = [];
     const connectAgentCalls: unknown[] = [];

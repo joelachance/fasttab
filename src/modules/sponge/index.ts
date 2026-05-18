@@ -235,12 +235,8 @@ async function createSpongeWallet(
 ): Promise<SpongeWalletLike> {
   const baseUrl = envWithDefault(env, "SPONGE_API_BASE", "https://api.wallet.paysponge.com");
   const apiKey = requiredEnv(env, "SPONGE_API_KEY");
-  const usePlatformAgent =
-    apiKey.startsWith("sponge_master") ||
-    Boolean(env.SPONGE_AGENT_ID?.trim()) ||
-    Boolean(env.SPONGE_AGENT_NAME?.trim());
 
-  if (!usePlatformAgent) {
+  if (!apiKey.startsWith("sponge_master")) {
     return connect({ apiKey, baseUrl, noBrowser: true });
   }
 
