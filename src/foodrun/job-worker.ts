@@ -435,7 +435,7 @@ async function handleCheckout(
   if (shouldPlaceLiveOrders(options.env)) {
     const sponge = options.sponge ?? new SpongeModule(options.env);
     const card = await sponge.issueFoodOrderCard({
-      amountUsd: (totalCents / 100).toFixed(2),
+      amountUsd: foodOrderCardAmountUsd(totalCents, options.env),
       merchantName: session.selectedRestaurant.name,
       merchantUrl:
         session.cart.checkoutUrl ??
@@ -740,6 +740,16 @@ function fallbackItemNotes(criteria: OrderCriteria): string | undefined {
 
 function cartTotalCents(cart: CartSummary | undefined): number | undefined {
   return cart?.estimatedTotal?.cents ?? cart?.subtotal?.cents;
+}
+
+/** Live checkout card limit: max(cart total, SPONGE_FOOD_ORDER_CARD_AMOUNT_USD floor). */
+export function foodOrderCardAmountUsd(totalCents: number, env: Env = process.env): string {
+  const floorUsd = Number.parseFloat(
+    envWithDefault(env, "SPONGE_FOOD_ORDER_CARD_AMOUNT_USD", "75"),
+  );
+  const floorCents = Number.isFinite(floorUsd) ? Math.round(floorUsd * 100) : 7500;
+
+  return (Math.max(totalCents, floorCents) / 100).toFixed(2);
 }
 
 function formatCartForPrompt(cart: CartSummary): string {

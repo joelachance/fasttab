@@ -6,6 +6,7 @@ import {
   type FoodrunBrowserUse,
   type FoodrunJobNotifier,
   type FoodrunJobStore,
+  type FoodrunSponge,
   type FoodrunStripe,
 } from "../src/foodrun/job-worker";
 import type { FoodrunJob, FoodrunOrderSession, FoodrunParticipant } from "../src/foodrun/order-state";
@@ -914,6 +915,57 @@ describe("processFoodrunJobs", () => {
         ],
       },
     });
+  });
+
+  test("live checkout issues sponge card at least SPONGE_FOOD_ORDER_CARD_AMOUNT_USD", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "issuing_card",
+      selectedRestaurant: {
+        name: "Insomnia Cookies",
+        orderingUrl: "https://insomniacookies.com/",
+        reason: "catalog",
+        dietaryFit: [],
+      },
+      cart: {
+        restaurantName: "Insomnia Cookies",
+        items: [{ name: "Classic Chocolate Chunk", quantity: 1, price: { currency: "usd", cents: 449 } }],
+        estimatedTotal: { currency: "usd", cents: 449 },
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    };
+    const { store } = createStore({
+      jobs: [job({ kind: "checkout_payment" })],
+      session,
+    });
+    const amounts: string[] = [];
+    const sponge: FoodrunSponge = {
+      issueFoodOrderCard: async (input) => {
+        amounts.push(input.amountUsd ?? "");
+        return { raw: { card: { number: "4111111111111111", cvc: "123" } } };
+      },
+    };
+    const sent: unknown[] = [];
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await processFoodrunJobs(1, {
+      store,
+      sponge,
+      notifier,
+      env: {
+        FOODRUN_CHECKOUT_MODE: "live",
+        SPONGE_FOOD_ORDER_CARD_AMOUNT_USD: "105",
+      },
+    });
+
+    expect(amounts).toEqual(["105.00"]);
+    expect(String((sent[0] as { body: string }).body)).toContain("checkout card");
   });
 
   test("dry-run checkout enqueues post-order split without placing an order", async () => {
