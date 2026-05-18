@@ -200,6 +200,34 @@ export class SpongeModule {
   }
 }
 
+
+const SPONGE_AGENT_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function resolvePlatformAgentId(
+  platform: SpongePlatformLike & { listAgents(): Promise<Array<{ id: string; name: string }>> },
+  agentIdOrName: string | undefined,
+  fallbackName: string,
+): Promise<string | undefined> {
+  const raw = agentIdOrName?.trim();
+
+  if (raw && SPONGE_AGENT_UUID_RE.test(raw)) {
+    return raw;
+  }
+
+  const lookup = raw || fallbackName;
+  const agents = await platform.listAgents();
+  const match = agents.find((agent) => agent.name === lookup || agent.id === lookup);
+
+  if (!match) {
+    throw new Error(
+      `No Sponge agent named "${lookup}". Set SPONGE_AGENT_ID to the agent UUID from the Sponge dashboard.`,
+    );
+  }
+
+  return match.id;
+}
+
 async function createSpongeWallet(
   env: Env,
   connect: SpongeWalletConnector,
@@ -207,13 +235,21 @@ async function createSpongeWallet(
 ): Promise<SpongeWalletLike> {
   const baseUrl = envWithDefault(env, "SPONGE_API_BASE", "https://api.wallet.paysponge.com");
   const apiKey = requiredEnv(env, "SPONGE_API_KEY");
+  const usePlatformAgent =
+    apiKey.startsWith("sponge_master") ||
+    Boolean(env.SPONGE_AGENT_ID?.trim()) ||
+    Boolean(env.SPONGE_AGENT_NAME?.trim());
 
-  if (!apiKey.startsWith("sponge_master")) {
+  if (!usePlatformAgent) {
     return connect({ apiKey, baseUrl, noBrowser: true });
   }
 
   const platform = await connectPlatform({ apiKey, baseUrl });
-  const agentId = env.SPONGE_AGENT_ID;
+  const agentId = await resolvePlatformAgentId(
+    platform as SpongePlatformLike & { listAgents(): Promise<Array<{ id: string; name: string }>> },
+    env.SPONGE_AGENT_ID,
+    envWithDefault(env, "SPONGE_AGENT_NAME", "Fasttab Foodrun Agent"),
+  );
   const agentKey =
     agentId ? await platform.getAgentApiKey(agentId, true)
     : await createPlatformAgent(platform, env);

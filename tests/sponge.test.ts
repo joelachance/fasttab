@@ -129,12 +129,15 @@ describe("SpongeModule", () => {
       async (options) => {
         platformCalls.push(options);
         return {
+          async listAgents() {
+            return [{ id: "agent_123", name: "Fasttab Test Agent" }];
+          },
           async createAgent(request) {
             platformCalls.push(request);
             return { agent: { id: "agent_123" }, apiKey: "sponge_test_agent_123" };
           },
-          async getAgentApiKey() {
-            return null;
+          async getAgentApiKey(agentId: string) {
+            return agentId === "agent_123" ? "sponge_test_agent_123" : null;
           },
           async connectAgent(request) {
             connectAgentCalls.push(request);
@@ -149,10 +152,8 @@ describe("SpongeModule", () => {
       apiKey: "sponge_master_123",
       baseUrl: "https://api.test.paysponge.com",
     });
-    expect(platformCalls[1]).toMatchObject({
-      name: "Fasttab Test Agent",
-      isTestMode: true,
-    });
-    expect(connectAgentCalls).toEqual([{ apiKey: "sponge_test_agent_123", agentId: undefined }]);
+    expect(connectAgentCalls).toEqual([
+      { apiKey: "sponge_test_agent_123", agentId: "agent_123" },
+    ]);
   });
 });

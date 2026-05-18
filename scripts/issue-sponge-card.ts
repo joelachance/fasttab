@@ -46,18 +46,32 @@ function lastFour(pan: string | undefined): string | undefined {
   return digits.length >= 4 ? digits.slice(-4) : undefined;
 }
 
+const SPONGE_AGENT_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
   const apiKey = requiredEnv(env, "SPONGE_API_KEY");
 
-  if (!apiKey.startsWith("sponge_master") || env.SPONGE_AGENT_ID?.trim()) {
+  const usePlatformAgent =
+    apiKey.startsWith("sponge_master") ||
+    Boolean(env.SPONGE_AGENT_ID?.trim()) ||
+    Boolean(env.SPONGE_AGENT_NAME?.trim());
+
+  if (!usePlatformAgent) {
     return;
   }
 
-  const agentName = envWithDefault(env, "SPONGE_AGENT_NAME", "Fasttab Foodrun Agent");
+  const raw = env.SPONGE_AGENT_ID?.trim();
+
+  if (raw && SPONGE_AGENT_UUID_RE.test(raw)) {
+    return;
+  }
+
+  const agentName = raw || envWithDefault(env, "SPONGE_AGENT_NAME", "Fasttab Foodrun Agent");
   const baseUrl = envWithDefault(env, "SPONGE_API_BASE", "https://api.wallet.paysponge.com");
   const platform = await SpongePlatform.connect({ apiKey, baseUrl });
   const agents = await platform.listAgents();
-  const match = agents.find((agent) => agent.name === agentName);
+  const match = agents.find((agent) => agent.name === agentName || agent.id === agentName);
 
   if (!match) {
     throw new Error(
@@ -66,7 +80,7 @@ async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
   }
 
   env.SPONGE_AGENT_ID = match.id;
-  console.error(`Using existing Sponge agent "${agentName}" (${match.id}).`);
+  console.error(`Using existing Sponge agent "${match.name}" (${match.id}).`);
 }
 
 try {
