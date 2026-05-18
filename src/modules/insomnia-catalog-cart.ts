@@ -11,6 +11,24 @@ export const INSOMNIA_CATALOG_CART_NOTE =
 
 const INSOMNIA_CHECKOUT_URL = "https://insomniacookies.com/";
 
+/** Buy 9 Get 3 Free — 12 cookies per bundle (9 paid + 3 free). */
+export const INSOMNIA_B9G3F_PRODUCT_URL = "https://insomniacookies.com/products/buy-9-get-3-free-1";
+export const INSOMNIA_B9G3F_DEAL_NAME = "Buy 9 Get 3 Free";
+export const INSOMNIA_B9G3F_COOKIES_PER_BUNDLE = 12;
+export const INSOMNIA_B9G3F_PAID_PER_BUNDLE = 9;
+export const INSOMNIA_B9G3F_FREE_PER_BUNDLE = 3;
+/** Placeholder per bundle; confirm live price at checkout on insomniacookies.com. */
+export const INSOMNIA_B9G3F_BUNDLE_CENTS_PLACEHOLDER = 4499;
+export const INSOMNIA_DEFAULT_BUNDLE_COUNT = 2;
+
+/** Suggested flavors per bundle (3 each × 4 SKUs = 12); pick paid + free slots on the deal page. */
+export const INSOMNIA_B9G3F_FLAVORS_PER_BUNDLE = [
+  { name: "Chocolate Chunk", quantity: 3 },
+  { name: "Cookies 'N Cream", quantity: 3 },
+  { name: "Classic with M&M'S", quantity: 3 },
+  { name: "Vegan Chocolate Chunk", quantity: 3 },
+] as const;
+
 const INSOMNIA_MENU = [
   { name: "Classic Chocolate Chunk", cents: 449 },
   { name: "Deluxe Chocolate Chunk", cents: 549 },
@@ -62,6 +80,45 @@ export function isInsomniaBrand(restaurant: RestaurantOption, criteria?: OrderCr
 
 export function isInsomniaCatalogCart(cart: CartSummary): boolean {
   return cart.blockers.some((blocker) => blocker.includes("Insomnia menu catalog"));
+}
+
+function formatB9G3FFlavorSummary(): string {
+  return INSOMNIA_B9G3F_FLAVORS_PER_BUNDLE.map((line) => `${line.quantity}× ${line.name}`).join(", ");
+}
+
+export function buildInsomniaB9G3FCart(
+  criteria: OrderCriteria,
+  restaurant: RestaurantOption,
+  bundleCount: number = INSOMNIA_DEFAULT_BUNDLE_COUNT,
+): CartSummary {
+  const deliveryNote = deliveryNotes(criteria);
+  const flavorSummary = formatB9G3FFlavorSummary();
+  const perBundleNote =
+    `Each bundle: ${INSOMNIA_B9G3F_COOKIES_PER_BUNDLE} cookies (${INSOMNIA_B9G3F_PAID_PER_BUNDLE} paid + ${INSOMNIA_B9G3F_FREE_PER_BUNDLE} free). Suggested flavors: ${flavorSummary}. Choose flavors on the deal product page.`;
+  const dealNote = `Add ${bundleCount}× "${INSOMNIA_B9G3F_DEAL_NAME}" (${INSOMNIA_B9G3F_PRODUCT_URL}). ${perBundleNote}`;
+  const priceNote =
+    `Estimated ${bundleCount}× @$${(INSOMNIA_B9G3F_BUNDLE_CENTS_PLACEHOLDER / 100).toFixed(2)} each (placeholder—site price applies at checkout).`;
+  const itemNotes = [deliveryNote, dealNote, priceNote].filter(Boolean).join(" ");
+
+  const subtotalCents = INSOMNIA_B9G3F_BUNDLE_CENTS_PLACEHOLDER * bundleCount;
+
+  return {
+    restaurantName: restaurant.name,
+    checkoutUrl: INSOMNIA_B9G3F_PRODUCT_URL,
+    items: [
+      {
+        name: INSOMNIA_B9G3F_DEAL_NAME,
+        quantity: bundleCount,
+        price: { currency: "usd", cents: INSOMNIA_B9G3F_BUNDLE_CENTS_PLACEHOLDER },
+        notes: itemNotes,
+      },
+    ],
+    subtotal: { currency: "usd", cents: subtotalCents },
+    estimatedTotal: { currency: "usd", cents: subtotalCents },
+    screenshots: [],
+    status: "draft",
+    blockers: [dealNote, priceNote, INSOMNIA_CATALOG_CART_NOTE],
+  };
 }
 
 export function buildCartFromLineItems(

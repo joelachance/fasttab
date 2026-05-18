@@ -6,7 +6,9 @@
  *   bun run order:insomnia-catalog -- --phone +15551234567
  *   bun run order:insomnia-catalog -- --address "560 20th St, San Francisco, CA"
  *   bun run order:insomnia-catalog -- --preset default
+ *   bun run order:insomnia-catalog -- --preset skus
  *   bun run order:insomnia-catalog -- --preset rotate --items 6
+ *   bun run order:insomnia-catalog -- --bundles 2
  *   bun run order:insomnia-catalog -- --sponge
  *
  * Env (.env.local via env helpers):
@@ -15,9 +17,9 @@
  *   SPONGE_API_KEY, SPONGE_AGENT_ID, … — required for --sponge (see sponge:fetch-card)
  *
  * Complete payment manually:
- *   1. Open the checkout URL (insomniacookies.com).
- *   2. Start delivery to the address in the cart notes; enter the customer phone at checkout.
- *   3. Add cookies matching the printed line items (names and quantities).
+ *   1. Open checkoutUrl (Buy 9 Get 3 Free product on insomniacookies.com).
+ *   2. Add the deal bundle count (default 2×); pick 9 paid + 3 free flavors per bundle on site.
+ *   3. Start delivery to the address in cart notes; enter the customer phone at checkout.
  *   4. Pay with your Sponge virtual card: run with --sponge or `bun run sponge:fetch-card`
  *      for masked PAN/expiry and limits; enter full card details on the Insomnia checkout form.
  */
@@ -27,7 +29,13 @@ import { envWithDefault, envWithDotenvLocalOverrides, requiredEnv } from "../src
 import { normalizePhone } from "../src/foodrun/customer-phone.js";
 import {
   buildCartFromLineItems,
+  buildInsomniaB9G3FCart,
   buildInsomniaCatalogCart,
+  INSOMNIA_B9G3F_COOKIES_PER_BUNDLE,
+  INSOMNIA_B9G3F_DEAL_NAME,
+  INSOMNIA_B9G3F_FLAVORS_PER_BUNDLE,
+  INSOMNIA_B9G3F_PRODUCT_URL,
+  INSOMNIA_DEFAULT_BUNDLE_COUNT,
   INSOMNIA_DEFAULT_LINE_ITEMS,
   insomniaCatalogCartEnabled,
   INSOMNIA_CATALOG_CART_NOTE,
@@ -54,22 +62,24 @@ const INSOMNIA_RESTAURANT: RestaurantOption = {
 const SPONGE_AGENT_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-type Preset = "default" | "rotate";
+type Preset = "default" | "skus" | "rotate";
 
 type CliOptions = {
   phone?: string;
   address: string;
   preset: Preset;
   rotateItems: number;
+  bundleCount: number;
   sponge: boolean;
 };
 
 function usage(): never {
-  console.error(`Usage: bun run order:insomnia-catalog [--phone E164] [--address "…"] [--preset default|rotate] [--items N] [--sponge]
+  console.error(`Usage: bun run order:insomnia-catalog [--phone E164] [--address "…"] [--preset default|skus|rotate] [--bundles N] [--items N] [--sponge]
 
   --phone     Customer delivery phone (E.164). Default: FOODRUN_DELIVERY_PHONE from .env.local
   --address   Delivery address. Default: ${DEFAULT_ADDRESS}
-  --preset    default: 4 SKUs × 3 each (12 cookies). rotate: cycle menu SKUs (see --items)
+  --preset    default: 2× Buy 9 Get 3 Free (${INSOMNIA_B9G3F_PRODUCT_URL}). skus: 4 flavors × 3 (12 cookies à la carte). rotate: cycle menu SKUs
+  --bundles   B9G3F bundle count for default preset (1–4). Default: ${INSOMNIA_DEFAULT_BUNDLE_COUNT}
   --items     Cookie line count for rotate preset only (1–12). Default: ${DEFAULT_ROTATE_ITEM_COUNT}
   --sponge    Fetch Sponge checkout card from .env.local and include masked card details
 `);
@@ -81,6 +91,7 @@ function parseArgs(argv: string[]): CliOptions {
   let address = DEFAULT_ADDRESS;
   let preset: Preset = "default";
   let rotateItems = DEFAULT_ROTATE_ITEM_COUNT;
+  let bundleCount = INSOMNIA_DEFAULT_BUNDLE_COUNT;
   let sponge = false;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -98,11 +109,21 @@ function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--preset") {
       const raw = argv[index + 1] ?? usage();
-      if (raw !== "default" && raw !== "rotate") {
-        console.error("--preset must be default or rotate");
+      if (raw !== "default" && raw !== "skus" && raw !== "rotate") {
+        console.error("--preset must be default, skus, or rotate");
         usage();
       }
       preset = raw;
+      index += 1;
+      continue;
+    }
+    if (arg === "--bundles") {
+      const raw = argv[index + 1] ?? usage();
+      bundleCount = Number.parseInt(raw, 10);
+      if (!Number.isFinite(bundleCount) || bundleCount < 1 || bundleCount > 4) {
+        console.error("--bundles must be an integer from 1 to 4");
+        usage();
+      }
       index += 1;
       continue;
     }
@@ -129,7 +150,7 @@ function parseArgs(argv: string[]): CliOptions {
     }
   }
 
-  return { phone, address, preset, rotateItems, sponge };
+  return { phone, address, preset, rotateItems, bundleCount, sponge };
 }
 
 async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
@@ -198,7 +219,7 @@ function maskedSpongeCard(card: FoodOrderCard) {
     merchantName: card.merchantName,
     merchantUrl: card.merchantUrl,
     paymentInstructions: [
-      "Open checkoutUrl and complete delivery checkout on insomniacookies.com.",
+      `Open checkoutUrl and add ${INSOMNIA_B9G3F_DEAL_NAME} bundles on insomniacookies.com.`,
       "Enter the full virtual card number, expiry, and CVC from Sponge (bun run sponge:fetch-card if not shown here).",
       "Use the delivery address and customer phone from cart line item notes.",
     ],
@@ -218,6 +239,8 @@ function buildCriteria(options: CliOptions, env: NodeJS.ProcessEnv): OrderCriter
 
   const participantCount =
     options.preset === "default" ?
+      options.bundleCount * INSOMNIA_B9G3F_COOKIES_PER_BUNDLE
+    : options.preset === "skus" ?
       INSOMNIA_DEFAULT_LINE_ITEMS.reduce((sum, line) => sum + line.quantity, 0)
     : options.rotateItems;
 
@@ -238,6 +261,9 @@ function buildCriteria(options: CliOptions, env: NodeJS.ProcessEnv): OrderCriter
 
 function buildCart(criteria: OrderCriteria, options: CliOptions): CartSummary {
   if (options.preset === "default") {
+    return buildInsomniaB9G3FCart(criteria, INSOMNIA_RESTAURANT, options.bundleCount);
+  }
+  if (options.preset === "skus") {
     return buildCartFromLineItems(criteria, INSOMNIA_RESTAURANT, INSOMNIA_DEFAULT_LINE_ITEMS);
   }
 
@@ -257,7 +283,10 @@ async function main(): Promise<void> {
   const cart = buildCart(criteria, cli);
   const lineItems = lineItemsFromCart(cart);
   const totalCents = cart.estimatedTotal?.cents ?? cart.subtotal?.cents;
-  const cookieCount = lineItems.reduce((sum, item) => sum + item.quantity, 0);
+  const cookieCount =
+    cli.preset === "default" ?
+      cli.bundleCount * INSOMNIA_B9G3F_COOKIES_PER_BUNDLE
+    : lineItems.reduce((sum, item) => sum + item.quantity, 0);
 
   let spongeCard: ReturnType<typeof maskedSpongeCard> | undefined;
 
@@ -274,9 +303,19 @@ async function main(): Promise<void> {
     console.error("Sponge checkout card fetched (masked below).");
   }
 
+  const flavorLines = INSOMNIA_B9G3F_FLAVORS_PER_BUNDLE.map((line) => `${line.quantity}× ${line.name}`);
+
   const payload = {
     catalogNote: INSOMNIA_CATALOG_CART_NOTE,
     preset: cli.preset,
+    bundleCount: cli.preset === "default" ? cli.bundleCount : undefined,
+    deal: cli.preset === "default" ? { name: INSOMNIA_B9G3F_DEAL_NAME, productUrl: INSOMNIA_B9G3F_PRODUCT_URL } : undefined,
+    suggestedFlavorsPerBundle: cli.preset === "default" ? flavorLines : undefined,
+    totalCookies: cookieCount,
+    pricePlaceholder:
+      cli.preset === "default" ?
+        "Per-bundle and order totals are estimates; site price applies at checkout."
+      : undefined,
     deliveryAddress: criteria.location.placeName ?? criteria.location.raw,
     deliveryPhone: criteria.deliveryPhone,
     checkoutUrl: cart.checkoutUrl,
@@ -298,12 +337,21 @@ async function main(): Promise<void> {
   console.error(`  Checkout: ${cart.checkoutUrl}`);
   console.error(`  Deliver to: ${payload.deliveryAddress}`);
   console.error(`  Phone: ${payload.deliveryPhone}`);
-  console.error(`  Items: ${cookieCount} cookies (${lineItems.length} SKUs), total ${payload.totalUsd ?? "n/a"}`);
-  for (const item of lineItems) {
-    console.error(`    - ${item.quantity}x ${item.name} @ ${item.unitPriceUsd ?? "?"}`);
+  if (cli.preset === "default") {
+    console.error(
+      `  Order on site: add ${cli.bundleCount}× "${INSOMNIA_B9G3F_DEAL_NAME}" (${INSOMNIA_B9G3F_COOKIES_PER_BUNDLE} cookies each: 9 paid + 3 free)`,
+    );
+    console.error(`  Suggested flavors per bundle: ${flavorLines.join(", ")}`);
+    console.error(`  Cookies total: ${cookieCount} (${cli.bundleCount} bundles)`);
+  } else {
+    console.error(`  Items: ${cookieCount} cookies (${lineItems.length} line(s)), total ${payload.totalUsd ?? "n/a"}`);
+    for (const item of lineItems) {
+      console.error(`    - ${item.quantity}x ${item.name} @ ${item.unitPriceUsd ?? "?"}`);
+    }
   }
+  console.error(`  Estimated total: ${payload.totalUsd ?? "n/a"}${payload.pricePlaceholder ? ` (${payload.pricePlaceholder})` : ""}`);
   console.error("");
-  console.error("To pay: open checkout URL, add matching cookies for delivery, checkout with Sponge card.");
+  console.error("To pay: open checkout URL, configure deal(s) + delivery, checkout with Sponge card.");
   if (!cli.sponge) {
     console.error("  Tip: re-run with --sponge or `bun run sponge:fetch-card` for card details.");
   }
