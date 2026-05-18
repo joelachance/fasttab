@@ -105,7 +105,7 @@ export class BrowserUseModule {
   private readonly model: string;
 
   constructor(env: Env = process.env, client?: BrowserUseClientLike) {
-    this.model = envWithDefault(env, "BROWSER_USE_MODEL", "claude-sonnet-4.6");
+    this.model = envWithDefault(env, "BROWSER_USE_MODEL", "gpt-5.4-mini");
     this.client =
       client ??
       new BrowserUse({
