@@ -49,6 +49,9 @@ function createFakeStore(
       },
       updateOrderSession: async (roomId, input) => {
         calls.push({ method: "updateOrderSession", input: { roomId, ...input } });
+        if (currentSession?.roomId === roomId) {
+          currentSession = { ...currentSession, ...input };
+        }
         return {} as never;
       },
       enqueueJob: async (input) => {
@@ -129,6 +132,7 @@ describe("text intake", () => {
           rememberPreference: async (input) => {
             remembered.push(input);
           },
+          searchPreferences: async () => ({ memories: [] }),
         },
       },
     );
@@ -275,6 +279,70 @@ describe("text intake", () => {
       reply: "Status: preparing checkout. Test mode will not place a real order.",
     });
     expect(calls.map((call) => call.method)).toContain("enqueueJob");
+  });
+
+  test("loads supermemory context into preferences on first message", async () => {
+    const { store, calls } = createFakeStore();
+    const searched: unknown[] = [];
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "Thai near Mission, vegetarian",
+        channel: "sms",
+      },
+      {
+        store,
+        memory: {
+          rememberPreference: async () => ({}),
+          searchPreferences: async (input) => {
+            searched.push(input);
+            return { memories: [{ content: "usually orders vegan" }] };
+          },
+        },
+      },
+    );
+
+    expect(searched[0]).toMatchObject({
+      phoneNumber: "+15551234567",
+      query: "Thai vegetarian Mission",
+    });
+    expect(result.extracted.notes?.join(" ")).toContain("usually orders vegan");
+    expect(
+      calls.some(
+        (call) =>
+          call.method === "appendEvent" &&
+          (call.input as { eventType?: string }).eventType === "supermemory_context_loaded",
+      ),
+    ).toBe(true);
+  });
+
+  test("confirm order uses demo checkout copy after payment approval", async () => {
+    const { store } = createFakeStore("confirming_cart", {
+      cart: {
+        restaurantName: "Mission Thai",
+        items: [{ name: "Pad Thai", quantity: 1 }],
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    });
+
+    const result = await handleFoodrunTextMessage(
+      {
+        roomId: "conv_123",
+        agentId: "agent_123",
+        fromNumber: "+15551234567",
+        body: "confirm order",
+        channel: "imessage",
+      },
+      { store, memory: null, env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "dry_run" } },
+    );
+
+    expect(result.reply).toContain("demo checkout");
+    expect(result.reply).toContain("payment approved");
   });
 
   test("confirm order mentions browser placement in live checkout mode", async () => {

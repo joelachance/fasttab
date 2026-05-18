@@ -68,6 +68,7 @@ function createStore(input: {
   participants?: FoodrunParticipant[];
 }): { store: FoodrunJobStore; calls: Array<{ method: string; input: unknown }> } {
   const calls: Array<{ method: string; input: unknown }> = [];
+  let session = input.session ?? baseSession;
 
   return {
     calls,
@@ -80,11 +81,12 @@ function createStore(input: {
       failJob: async (jobId, error) => {
         calls.push({ method: "failJob", input: { jobId, error } });
       },
-      getOrderSession: async () => input.session ?? baseSession,
+      getOrderSession: async () => session,
       listParticipants: async () => input.participants ?? [participant],
       updateOrderSession: async (roomId, update) => {
         calls.push({ method: "updateOrderSession", input: { roomId, ...update } });
-        return { ...(input.session ?? baseSession), ...update };
+        session = { ...session, ...update };
+        return session;
       },
       appendEvent: async (event) => {
         calls.push({ method: "appendEvent", input: event });
@@ -436,7 +438,7 @@ describe("processFoodrunJobs", () => {
           },
         },
         notifier,
-        env: { FOODRUN_DEMO_MODE: "true" },
+        env: { FOODRUN_DEMO_MODE: "true", FOODRUN_DEMO_FROM_START: "true" },
       }),
     ).resolves.toMatchObject({ processed: 1 });
 
@@ -485,7 +487,12 @@ describe("processFoodrunJobs", () => {
     };
 
     await expect(
-      processFoodrunJobs(1, { store, browser, notifier, env: { FOODRUN_DEMO_MODE: "true" } }),
+      processFoodrunJobs(1, {
+        store,
+        browser,
+        notifier,
+        env: { FOODRUN_DEMO_MODE: "true", FOODRUN_DEMO_FROM_START: "true" },
+      }),
     ).resolves.toMatchObject({ processed: 1 });
 
     const update = calls.find((call) => call.method === "updateOrderSession")?.input as {
@@ -1274,6 +1281,93 @@ describe("processFoodrunJobs", () => {
       cvc: "123",
       expiration: "12/29",
     });
+  });
+
+  test("post-payment demo checkout records approval and demo messaging", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "issuing_card",
+      selectedRestaurant: {
+        name: "Mission Thai",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: [],
+      },
+      cart: {
+        restaurantName: "Mission Thai",
+        items: [{ name: "Pad Thai", quantity: 2 }],
+        estimatedTotal: { currency: "usd", cents: 4200 },
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "checkout_payment" })],
+      session,
+    });
+    const sent: unknown[] = [];
+    const notifier: FoodrunJobNotifier = {
+      sendText: async (input) => {
+        sent.push(input);
+      },
+    };
+
+    await processFoodrunJobs(1, {
+      store,
+      notifier,
+      env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "dry_run" },
+    });
+
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      orderConfirmation: {
+        raw: { checkoutMode: "dry_run", paymentApproved: true, demoMode: true },
+      },
+    });
+    expect(String((sent[0] as { body: string }).body)).toContain("demo checkout complete");
+  });
+
+  test("restaurant search loads supermemory context before criteria build", async () => {
+    const { store, calls } = createStore({ jobs: [job()] });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => ({
+        sessionId: BROWSER_SEARCH_SESSION_ID,
+        liveUrl: "https://live.example/search",
+        output: {
+          restaurants: [
+            {
+              name: "Mission Thai",
+              orderingUrl: "https://example.com/order",
+              reason: "Close",
+              dietaryFit: [],
+            },
+          ],
+        },
+        raw: {},
+      }),
+      buildCart: async () => {
+        throw new Error("not reached");
+      },
+    };
+
+    await processFoodrunJobs(1, {
+      store,
+      browser,
+      availabilityScanner: { findCandidates: async () => [] },
+      notifier: null,
+      memory: {
+        searchPreferences: async () => ({ memories: [{ content: "loves spicy food" }] }),
+      },
+    });
+
+    expect(
+      calls.some(
+        (call) =>
+          call.method === "updateOrderSession" &&
+          (call.input as { supermemoryContext?: unknown[] }).supermemoryContext?.[0]?.content ===
+            "loves spicy food",
+      ),
+    ).toBe(true);
   });
 
   test("dry-run checkout enqueues post-order split without placing an order", async () => {

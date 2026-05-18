@@ -33,7 +33,19 @@ import type {
   FoodrunParticipant,
 } from "./order-state.js";
 import { resolveCustomerDeliveryPhone } from "./customer-phone.js";
-import { isDemoMode, shouldPlaceLiveOrders } from "./runtime-config.js";
+import {
+  isDemoMode,
+  shouldPlaceLiveOrders,
+  shouldUseDemoCheckout,
+  shouldUseDemoRestaurantPipeline,
+} from "./runtime-config.js";
+import {
+  createSupermemoryReader,
+  fetchSupermemoryContext,
+  supermemoryHints,
+  supermemoryQueryFromPreferences,
+  type SupermemoryReader,
+} from "./supermemory-context.js";
 
 export const FOODRUN_JOB_MAX_DURATION_SECONDS = 300;
 export const FOODRUN_STALE_JOB_SECONDS = 120;
@@ -82,6 +94,7 @@ export type ProcessFoodrunJobsOptions = {
   availabilityScanner?: FoodrunAvailabilityScanner;
   stripe?: FoodrunStripe;
   sponge?: FoodrunSponge;
+  memory?: SupermemoryReader | null;
   notifier?: FoodrunJobNotifier | null;
   env?: Env;
 };
@@ -214,9 +227,11 @@ async function searchRestaurants(
   const browser = options.browser ?? new BrowserUseModule(options.env);
   const availabilityScanner =
     options.availabilityScanner ?? new RestaurantAvailabilityModule(options.env ?? process.env);
-  const criteria = buildOrderCriteria(session, participants, undefined, options.env);
+  await ensureSupermemoryContext(job, session, participants, options);
+  const sessionAfterMemory = await getSession(options.store, job.roomId);
+  const criteria = buildOrderCriteria(sessionAfterMemory, participants, undefined, options.env);
 
-  if (isDemoMode(options.env)) {
+  if (shouldUseDemoRestaurantPipeline(options.env)) {
     const restaurant = demoRestaurantFromCriteria(criteria);
 
     await options.store.updateOrderSession(job.roomId, {
@@ -458,7 +473,7 @@ async function handleCheckout(
 
   if (
     !shouldPlaceLiveOrders(options.env) ||
-    isDemoMode(options.env) ||
+    shouldUseDemoCheckout(session.state, options.env) ||
     isDemoCatalogCart(session.cart)
   ) {
     await completeDryRunCheckout(job, options, session, totalCents);
@@ -590,13 +605,18 @@ async function completeDryRunCheckout(
   session: FoodrunOrderSession,
   totalCents: number,
 ): Promise<void> {
+  const demoCheckout = shouldUseDemoCheckout(session.state, options.env);
+
   await options.store.updateOrderSession(job.roomId, {
     state: "splitting_bill",
     orderConfirmation: {
       restaurantName: session.selectedRestaurant!.name,
       confirmationNumber: `dry_run_${job.jobId}`,
       finalTotalCents: totalCents,
-      raw: { checkoutMode: "dry_run" },
+      raw: {
+        checkoutMode: "dry_run",
+        ...(demoCheckout ? { paymentApproved: true, demoMode: true } : {}),
+      },
     },
   });
   await options.store.enqueueJob({
@@ -611,7 +631,9 @@ async function completeDryRunCheckout(
   await notify(
     job,
     options,
-    "Status: test checkout complete. Dry run: I did not place a real order. I'll create Stripe split links from the draft cart total.",
+    demoCheckout ?
+      "Status: demo checkout complete (payment approved). No real restaurant order or card charge. I'll text Stripe split links from your cart total."
+    : "Status: test checkout complete. Dry run: I did not place a real order. I'll create Stripe split links from the draft cart total.",
   );
 }
 
@@ -656,6 +678,49 @@ async function createPostOrderSplits(
   }
 }
 
+async function ensureSupermemoryContext(
+  job: FoodrunJob,
+  session: FoodrunOrderSession,
+  participants: FoodrunParticipant[],
+  options: ProcessFoodrunJobsOptions & { store: FoodrunJobStore },
+): Promise<void> {
+  if (session.supermemoryContext.length > 0) {
+    return;
+  }
+
+  const phoneNumber =
+    session.initiatorPhoneNumber ||
+    participants.find((participant) => participant.phoneNumber)?.phoneNumber;
+
+  if (!phoneNumber) {
+    return;
+  }
+
+  const memory =
+    options.memory === undefined ? createSupermemoryReader(options.env) : options.memory;
+
+  if (!memory) {
+    return;
+  }
+
+  const context = await fetchSupermemoryContext(
+    phoneNumber,
+    supermemoryQueryFromPreferences(session.confirmedPreferences),
+    memory,
+  );
+
+  if (context.length === 0) {
+    return;
+  }
+
+  await options.store.updateOrderSession(job.roomId, { supermemoryContext: context });
+  await options.store.appendEvent({
+    roomId: job.roomId,
+    eventType: "supermemory_context_loaded",
+    payload: { count: context.length },
+  });
+}
+
 async function getSession(
   store: FoodrunJobStore,
   roomId: string,
@@ -685,6 +750,12 @@ function buildOrderCriteria(
       preferences.push(`Current cart before changes: ${formatCartForPrompt(session.cart)}`);
     }
     preferences.push(`Cart change requested by text: ${editText}`);
+  }
+
+  const memoryHints = supermemoryHints(session.supermemoryContext);
+
+  if (memoryHints.length) {
+    preferences.push(`Known preferences from past orders: ${memoryHints.join("; ")}`);
   }
 
   const location =
@@ -764,7 +835,7 @@ async function buildCartWithFallback(
   options: Parameters<FoodrunBrowserUse["buildCart"]>[2],
   env: Env = process.env,
 ): ReturnType<FoodrunBrowserUse["buildCart"]> {
-  if (isDemoMode(env)) {
+  if (shouldUseDemoRestaurantPipeline(env)) {
     const output = buildDemoCatalogCart(criteria, restaurant);
 
     return {

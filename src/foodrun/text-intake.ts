@@ -2,7 +2,18 @@ import { OrderSessionStore } from "./order-session-store.js";
 import type { ConfirmedPreferences, FoodrunOrderState } from "./order-state.js";
 import { SupermemoryModule } from "../modules/supermemory.js";
 import type { Env } from "../env.js";
-import { isDemoMode, shouldPlaceLiveOrders } from "./runtime-config.js";
+import {
+  isDemoFromStart,
+  isDemoMode,
+  shouldPlaceLiveOrders,
+} from "./runtime-config.js";
+import {
+  createSupermemoryReader,
+  fetchSupermemoryContext,
+  mergeSupermemoryIntoPreferences,
+  supermemoryQueryFromPreferences,
+  type SupermemoryReader,
+} from "./supermemory-context.js";
 
 export type FoodrunTextMessage = {
   roomId: string;
@@ -30,7 +41,7 @@ export type FoodrunTextStore = Pick<
   | "enqueueJob"
 >;
 
-export type FoodrunPreferenceMemory = Pick<SupermemoryModule, "rememberPreference">;
+export type FoodrunPreferenceMemory = Pick<SupermemoryModule, "rememberPreference" | "searchPreferences">;
 
 export async function handleFoodrunTextMessage(
   input: FoodrunTextMessage,
@@ -55,7 +66,16 @@ export async function handleFoodrunTextMessage(
     throw new Error(`Order session missing after create: ${input.roomId}`);
   }
 
-  const preferences = mergePreferences(session.confirmedPreferences, extracted);
+  const memory = options.memory ?? createMemory(options.env);
+  let preferences = mergePreferences(session.confirmedPreferences, extracted);
+  const supermemoryContext = await hydrateSupermemoryContext(
+    input,
+    session,
+    preferences,
+    store,
+    memory,
+  );
+  preferences = mergeSupermemoryIntoPreferences(preferences, supermemoryContext);
   await store.upsertParticipant({
     roomId: input.roomId,
     phoneNumber: input.fromNumber,
@@ -174,7 +194,9 @@ export async function handleFoodrunTextMessage(
 
     return {
       reply:
-        shouldPlaceLiveOrders(options.env) ?
+        isDemoMode(options.env) && !shouldPlaceLiveOrders(options.env) ?
+          "Status: payment approved. Running demo checkout — no real card or restaurant order. I'll text when split links are ready."
+        : shouldPlaceLiveOrders(options.env) ?
           "Status: preparing checkout. I'll place the order on the restaurant site with a virtual card and text you when it's done."
         : "Status: preparing checkout. Test mode will not place a real order.",
       state: "issuing_card",
@@ -203,7 +225,7 @@ export async function handleFoodrunTextMessage(
 
     return {
       reply:
-        isDemoMode(options.env) ?
+        isDemoFromStart(options.env) ?
           "Status: demo mode. Building your draft cart now — I'll text when it's ready (not a real restaurant order)."
         : "Status: searching restaurants. I'll text you when I find a match and start the cart.",
       state: "searching_restaurants",
@@ -215,7 +237,7 @@ export async function handleFoodrunTextMessage(
     state: "confirming_preferences",
     confirmedPreferences: preferences,
   });
-  await rememberExtractedFacts(input, preferences, options.memory ?? createMemory(options.env));
+  await rememberExtractedFacts(input, preferences, memory);
 
   return {
     reply: formatPreferenceConfirmation(preferences, options.env),
@@ -321,7 +343,7 @@ export function formatPreferenceConfirmation(
   env: Env = process.env,
 ): string {
   const facts = preferenceLines(preferences);
-  const demo = isDemoMode(env);
+  const demo = isDemoFromStart(env);
 
   if (facts.length === 0) {
     return demo ?
@@ -397,7 +419,36 @@ async function rememberExtractedFacts(
 }
 
 function createMemory(env: Env = process.env): FoodrunPreferenceMemory | null {
-  return env.SUPERMEMORY_API_KEY ? new SupermemoryModule(env) : null;
+  return createSupermemoryReader(env);
+}
+
+async function hydrateSupermemoryContext(
+  input: FoodrunTextMessage,
+  session: { roomId: string; supermemoryContext: unknown[]; confirmedPreferences: ConfirmedPreferences },
+  preferences: ConfirmedPreferences,
+  store: FoodrunTextStore,
+  memory: SupermemoryReader | null,
+): Promise<unknown[]> {
+  if (session.supermemoryContext.length > 0) {
+    return session.supermemoryContext;
+  }
+
+  const context = await fetchSupermemoryContext(
+    input.fromNumber,
+    supermemoryQueryFromPreferences(preferences),
+    memory,
+  );
+
+  if (context.length > 0) {
+    await store.updateOrderSession(input.roomId, { supermemoryContext: context });
+    await store.appendEvent({
+      roomId: input.roomId,
+      eventType: "supermemory_context_loaded",
+      payload: { count: context.length },
+    });
+  }
+
+  return context;
 }
 
 function uniqueMatches(text: string, patterns: Array<[string, RegExp]>): string[] {
