@@ -218,7 +218,7 @@ describe("processFoodrunJobs", () => {
         expect(criteria.cuisine).toBe("Thai");
         expect(candidates).toHaveLength(1);
         expect(candidates[0]?.name).toBe("Open Thai");
-        expect(options?.timeoutMs).toBe(210_000);
+        expect(options?.timeoutMs).toBe(270_000);
 
         return {
           sessionId: "browser_verify_123",
@@ -574,8 +574,8 @@ describe("processFoodrunJobs", () => {
         throw new Error("searchRestaurants should not run in the cart_build job");
       },
       buildCart: async (_criteria, _restaurant, options) => {
-        expect(options?.sessionId).toBeUndefined();
-        expect(options?.timeoutMs).toBe(240_000);
+        expect(options?.sessionId).toBe("browser_search_123");
+        expect(options?.timeoutMs).toBe(270_000);
 
         return {
         sessionId: "browser_cart_123",
@@ -876,7 +876,7 @@ describe("processFoodrunJobs", () => {
         throw new Error("searchRestaurants should not run in the cart_edit job");
       },
       buildCart: async (criteria, _restaurant, options) => {
-        expect(options?.sessionId).toBeUndefined();
+        expect(options?.sessionId).toBe("browser_cart_123");
         expect(criteria.preferences).toContain(
           "Current cart before changes: Mission Thai, items: 2x Pad Thai $16.00 (no peanuts), total: $42.00",
         );

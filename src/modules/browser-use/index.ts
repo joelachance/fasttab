@@ -216,8 +216,19 @@ export type BuildCartPromptOptions = {
   marketplaceProvider?: MarketplaceProvider;
 };
 
-export const OFFICIAL_DIRECT_CART_TIMEOUT_MS = 210_000;
+export const OFFICIAL_DIRECT_CART_TIMEOUT_MS = 270_000;
 export const MARKETPLACE_FALLBACK_TIMEOUT_MS = 150_000;
+
+/** Split official + Grubhub fallback so sequential attempts stay within one Vercel job budget. */
+export function officialDirectCartTimeouts(totalBudgetMs = OFFICIAL_DIRECT_CART_TIMEOUT_MS): {
+  officialTimeoutMs: number;
+  marketplaceFallbackMs: number;
+} {
+  const marketplaceFallbackMs = Math.min(MARKETPLACE_FALLBACK_TIMEOUT_MS, totalBudgetMs);
+  const officialTimeoutMs = Math.max(60_000, totalBudgetMs - marketplaceFallbackMs);
+
+  return { officialTimeoutMs, marketplaceFallbackMs };
+}
 export const MARKETPLACE_PARALLEL_TIMEOUT_MS = 120_000;
 
 export async function buildCartWithOrderingProviders(
@@ -316,7 +327,8 @@ export async function buildOfficialDirectCartWithFallback(
   restaurant: RestaurantOption,
   options?: BrowserUseRunOptions,
 ): Promise<BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>>> {
-  const officialTimeoutMs = options?.timeoutMs ?? OFFICIAL_DIRECT_CART_TIMEOUT_MS;
+  const totalBudgetMs = options?.timeoutMs ?? OFFICIAL_DIRECT_CART_TIMEOUT_MS;
+  const { officialTimeoutMs, marketplaceFallbackMs } = officialDirectCartTimeouts(totalBudgetMs);
   const blockers: string[] = [];
   let lastResult: BrowserUseRunResult<z.output<typeof CartBuildOutputSchema>> | undefined;
 
@@ -341,7 +353,7 @@ export async function buildOfficialDirectCartWithFallback(
     browser,
     criteria,
     restaurant,
-    { ...options, timeoutMs: MARKETPLACE_FALLBACK_TIMEOUT_MS },
+    { ...options, timeoutMs: marketplaceFallbackMs },
     { useMarketplace: true, marketplaceProvider: "grubhub" },
   );
   lastResult = marketplace;

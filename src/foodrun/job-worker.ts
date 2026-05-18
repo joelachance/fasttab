@@ -20,7 +20,7 @@ import {
   isInsomniaCatalogCart,
 } from "../modules/insomnia-catalog-cart.js";
 import { RestaurantAvailabilityModule } from "../modules/restaurant-availability.js";
-import { SpongeModule } from "../modules/sponge/index.js";
+import { SpongeModule, type FoodOrderCard } from "../modules/sponge/index.js";
 import { StripeModule } from "../modules/stripe/index.js";
 import { splitEvenly } from "../modules/split-bill/index.js";
 import type { CartSummary, OrderCriteria, RestaurantOption, SplitLineItem } from "../types.js";
@@ -340,7 +340,7 @@ async function buildCart(
     criteria,
     session.selectedRestaurant,
     {
-      ...browserOptions(options.env, session.selectedRestaurant),
+      ...browserOptions(options.env, session),
     },
     options.env,
   );
@@ -382,7 +382,7 @@ async function editCart(
     criteria,
     session.selectedRestaurant,
     {
-      ...browserOptions(options.env, session.selectedRestaurant),
+      ...browserOptions(options.env, session),
     },
     options.env,
   );
@@ -399,6 +399,26 @@ async function editCart(
     payload: { editText: stringPayload(job, "editText"), cart: cart.output },
   });
   await notify(job, options, formatCartReadyText(session.selectedRestaurant, cart.output));
+}
+
+/** Second SMS when Sponge returns PAN/CVC (hackathon manual checkout). */
+function formatSpongeCardDetailsSms(card: FoodOrderCard): string | null {
+  const pan = card.cardNumber?.trim();
+
+  if (!pan) {
+    return null;
+  }
+
+  const exp =
+    card.expiration?.trim() ||
+    (card.expiryMonth && card.expiryYear ? `${card.expiryMonth}/${card.expiryYear}` : "");
+  const lines = [
+    `Card: ${pan}`,
+    exp ? `Exp: ${exp}` : "",
+    card.cvc?.trim() ? `CVC: ${card.cvc.trim()}` : "",
+  ].filter(Boolean);
+
+  return lines.join("\n");
 }
 
 async function handleCheckout(
@@ -438,6 +458,11 @@ async function handleCheckout(
       options,
       "Status: checkout paused. I issued a checkout card. Live browser payment placement is not wired yet, so I stopped before submitting the order.",
     );
+    const cardSms = formatSpongeCardDetailsSms(card);
+
+    if (cardSms) {
+      await notify(job, options, cardSms);
+    }
     return;
   }
 
@@ -561,29 +586,21 @@ function buildOrderCriteria(
   };
 }
 
-function cartBuildTimeoutMs(env: Env = process.env, restaurant?: RestaurantOption): number {
-  const defaultMs = Number(envWithDefault(env, "BROWSER_USE_CART_TIMEOUT_MS", "240000"));
-
-  if (restaurant && hasOfficialDirectOrdering(restaurant)) {
-    return 210_000;
-  }
-
-  return defaultMs;
+function cartBuildTimeoutMs(env: Env = process.env): number {
+  return Number(envWithDefault(env, "BROWSER_USE_CART_TIMEOUT_MS", "270000"));
 }
 
-function browserOptions(env: Env = process.env, restaurant?: RestaurantOption) {
+function browserOptions(env: Env = process.env, session?: Pick<FoodrunOrderSession, "browserUseSessionId">) {
   return {
     keepAlive: true,
     maxCostUsd: Number(env.BROWSER_USE_MAX_COST_USD ?? 2),
-    timeoutMs: cartBuildTimeoutMs(env, restaurant),
+    timeoutMs: cartBuildTimeoutMs(env),
+    ...(session?.browserUseSessionId ? { sessionId: session.browserUseSessionId } : {}),
   };
 }
 
 function availabilityBrowserOptions(env: Env = process.env) {
-  return {
-    ...browserOptions(env),
-    timeoutMs: 210_000,
-  };
+  return browserOptions(env);
 }
 
 async function buildCartWithFallback(
