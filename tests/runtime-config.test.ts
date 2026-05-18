@@ -40,7 +40,11 @@ describe("foodrunRuntimeConfig", () => {
     expect(
       isDemoFromStart({ FOODRUN_DEMO_MODE: "true", FOODRUN_DEMO_FROM_START: "true" }),
     ).toBe(true);
-    expect(shouldUseDemoRestaurantPipeline({ FOODRUN_DEMO_MODE: "true" })).toBe(false);
+  });
+
+  test("demo restaurant pipeline follows FOODRUN_DEMO_MODE", () => {
+    expect(shouldUseDemoRestaurantPipeline({})).toBe(false);
+    expect(shouldUseDemoRestaurantPipeline({ FOODRUN_DEMO_MODE: "true" })).toBe(true);
     expect(
       shouldUseDemoRestaurantPipeline({
         FOODRUN_DEMO_MODE: "true",
@@ -49,16 +53,19 @@ describe("foodrunRuntimeConfig", () => {
     ).toBe(true);
   });
 
-  test("demo checkout runs after payment approval by default", () => {
+  test("demo mode forces dry-run checkout even when checkout mode is live", () => {
+    const env = { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "live" };
+
+    expect(shouldPlaceLiveOrders(env)).toBe(false);
+    expect(shouldUseDemoCheckout("confirming_cart", env)).toBe(true);
+    expect(shouldUseDemoCheckout("issuing_card", env)).toBe(true);
+  });
+
+  test("demo checkout flag follows FOODRUN_DEMO_MODE", () => {
     expect(isDemoPaymentApproved("confirming_cart")).toBe(false);
     expect(isDemoPaymentApproved("issuing_card")).toBe(true);
-    expect(shouldUseDemoCheckout("confirming_cart", { FOODRUN_DEMO_MODE: "true" })).toBe(false);
+    expect(shouldUseDemoCheckout("confirming_cart", { FOODRUN_DEMO_MODE: "true" })).toBe(true);
     expect(shouldUseDemoCheckout("issuing_card", { FOODRUN_DEMO_MODE: "true" })).toBe(true);
-    expect(
-      shouldUseDemoCheckout("confirming_cart", {
-        FOODRUN_DEMO_MODE: "true",
-        FOODRUN_DEMO_FROM_START: "true",
-      }),
-    ).toBe(true);
+    expect(shouldUseDemoCheckout("confirming_cart", {})).toBe(false);
   });
 });

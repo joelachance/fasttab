@@ -404,6 +404,46 @@ describe("processFoodrunJobs", () => {
     expect(String((sent[0] as { body: string }).body)).toContain("Insomnia menu catalog");
   });
 
+  test("demo mode without FROM_START still skips browser search", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "searching_restaurants",
+      confirmedPreferences: {
+        cuisines: ["Thai"],
+        location: "Mission, San Francisco",
+        pickupOrDelivery: "delivery",
+      },
+    };
+    const { store, calls } = createStore({ jobs: [job()], session });
+    const browser: FoodrunBrowserUse = {
+      searchRestaurants: async () => {
+        throw new Error("searchRestaurants should not run when FOODRUN_DEMO_MODE is true");
+      },
+      buildCart: async () => {
+        throw new Error("buildCart should not run in restaurant_search job");
+      },
+    };
+
+    await expect(
+      processFoodrunJobs(1, {
+        store,
+        browser,
+        availabilityScanner: {
+          findCandidates: async () => {
+            throw new Error("availability should not run in demo mode");
+          },
+        },
+        notifier: null,
+        env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "dry_run" },
+      }),
+    ).resolves.toMatchObject({ processed: 1 });
+
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      selectedRestaurant: { name: "FastTab Demo Bakery" },
+      browserUseSessionId: null,
+    });
+  });
+
   test("demo mode skips browser search and uses stub restaurant", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
@@ -500,11 +540,15 @@ describe("processFoodrunJobs", () => {
     };
     expect(update?.browserUseSessionId).toBe("demo_catalog_cart");
     expect(update?.cart?.items[0]?.name).toBe("Classic Chocolate Chunk");
-    expect(String((sent[0] as { body: string }).body)).toContain("not a real order");
-    expect(String((sent[0] as { body: string }).body).toLowerCase()).not.toContain("captcha");
+    const body = String((sent[0] as { body: string }).body);
+    expect(body).toContain("Demo cart ready");
+    expect(body.toLowerCase()).toContain("not a real order");
+    expect(body.toLowerCase()).not.toContain("browser use");
+    expect(body.toLowerCase()).not.toContain("captcha");
+    expect(body.split("\n").length).toBeLessThanOrEqual(3);
   });
 
-  test("demo mode strips captcha from cart-ready SMS blockers", async () => {
+  test("demo mode never surfaces browser-use blockers in cart SMS", async () => {
     const session: FoodrunOrderSession = {
       ...baseSession,
       state: "building_cart",
@@ -513,9 +557,9 @@ describe("processFoodrunJobs", () => {
         location: "Mission",
       },
       selectedRestaurant: {
-        name: "Mission Thai",
-        orderingUrl: "https://example.com/order",
-        reason: "Close",
+        name: "FastTab Demo Bakery",
+        orderingUrl: "https://fasttab.demo/",
+        reason: "demo",
         dietaryFit: [],
       },
     };
@@ -524,18 +568,9 @@ describe("processFoodrunJobs", () => {
       searchRestaurants: async () => {
         throw new Error("searchRestaurants should not run");
       },
-      buildCart: async () => ({
-        sessionId: BROWSER_CART_SESSION_ID,
-        output: {
-          restaurantName: "Mission Thai",
-          checkoutUrl: "https://example.com/order",
-          items: [{ name: "Pad Thai", quantity: 1, price: { currency: "usd", cents: 1800 } }],
-          screenshots: [],
-          status: "draft",
-          blockers: ["reCAPTCHA blocked checkout", "login required"],
-        },
-        raw: {},
-      }),
+      buildCart: async () => {
+        throw new Error("buildCart should not run in demo mode");
+      },
     };
     const sent: unknown[] = [];
     const notifier: FoodrunJobNotifier = {
@@ -553,7 +588,9 @@ describe("processFoodrunJobs", () => {
 
     const body = String((sent[0] as { body: string }).body).toLowerCase();
     expect(body).not.toContain("captcha");
-    expect(body).toContain("login required");
+    expect(body).not.toContain("browser use");
+    expect(body).not.toContain("blocked by");
+    expect(body).toContain("demo cart ready");
   });
 
   test("notifies requester when restaurant search is missing a delivery area", async () => {
@@ -1448,6 +1485,52 @@ describe("processFoodrunJobs", () => {
       cardNumber: "4111111111111111",
       cvc: "123",
       expiration: "12/29",
+    });
+  });
+
+  test("demo checkout skips sponge even when checkout mode is live", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "issuing_card",
+      selectedRestaurant: {
+        name: "FastTab Demo Bakery",
+        orderingUrl: "https://fasttab.demo/",
+        reason: "demo",
+        dietaryFit: [],
+      },
+      cart: {
+        restaurantName: "FastTab Demo Bakery",
+        items: [{ name: "Classic Chocolate Chunk", quantity: 2 }],
+        estimatedTotal: { currency: "usd", cents: 898 },
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: ["FastTab hackathon demo — not a real order. No browser or restaurant checkout."],
+      },
+    };
+    const { store, calls } = createStore({
+      jobs: [job({ kind: "checkout_payment" })],
+      session,
+    });
+    let spongeCalled = false;
+    const sponge = {
+      fetchCheckoutCard: async () => {
+        spongeCalled = true;
+        throw new Error("Failed to get agent info. The API key may be invalid or expired.");
+      },
+    };
+
+    await processFoodrunJobs(1, {
+      store,
+      sponge,
+      notifier: null,
+      env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "live" },
+    });
+
+    expect(spongeCalled).toBe(false);
+    expect(calls.find((call) => call.method === "updateOrderSession")?.input).toMatchObject({
+      orderConfirmation: {
+        raw: { checkoutMode: "dry_run", paymentApproved: true, demoMode: true },
+      },
     });
   });
 

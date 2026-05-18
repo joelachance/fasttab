@@ -1,3 +1,9 @@
+/**
+ * Vercel / production env for hackathon SMS demo (set all for bulletproof demo):
+ * - FOODRUN_DEMO_MODE=true — stub bakery search/cart, no Browser Use blockers in SMS, forced dry-run checkout
+ * - FOODRUN_DEMO_FROM_START=true — same pipeline (optional; FOODRUN_DEMO_MODE alone is enough)
+ * - FOODRUN_CHECKOUT_MODE=dry_run — never Sponge / live browser checkout (ignored when demo mode is on)
+ */
 import { envWithDefault, type Env } from "../env.js";
 import type { FoodrunOrderState } from "./order-state.js";
 
@@ -27,6 +33,10 @@ export function foodrunRuntimeConfig(env: Env = process.env): FoodrunRuntimeConf
 }
 
 export function shouldPlaceLiveOrders(env: Env = process.env): boolean {
+  if (isDemoMode(env)) {
+    return false;
+  }
+
   return foodrunRuntimeConfig(env).checkoutMode === "live";
 }
 
@@ -35,7 +45,7 @@ export function isDemoMode(env: Env = process.env): boolean {
   return envWithDefault(env, "FOODRUN_DEMO_MODE", "false").toLowerCase() === "true";
 }
 
-/** Legacy hackathon path: demo bakery from restaurant search (skip Browser Use). */
+/** Legacy alias: demo-from-start is enabled whenever demo mode is on. */
 export function isDemoFromStart(env: Env = process.env): boolean {
   return (
     isDemoMode(env) &&
@@ -47,23 +57,15 @@ export function isDemoPaymentApproved(sessionState: FoodrunOrderState): boolean 
   return DEMO_PAYMENT_APPROVED_STATES.has(sessionState);
 }
 
-/** Stub restaurant search + demo catalog cart (FOODRUN_DEMO_FROM_START=true only). */
+/** Stub restaurant search + demo catalog cart (any FOODRUN_DEMO_MODE). */
 export function shouldUseDemoRestaurantPipeline(env: Env = process.env): boolean {
-  return isDemoFromStart(env);
+  return isDemoMode(env);
 }
 
-/** Skip Sponge/Browser Use checkout; dry-run + demo SMS after cart approval. */
+/** Skip Sponge/Browser Use checkout; dry-run + demo SMS. */
 export function shouldUseDemoCheckout(
-  sessionState: FoodrunOrderState,
+  _sessionState: FoodrunOrderState,
   env: Env = process.env,
 ): boolean {
-  if (!isDemoMode(env)) {
-    return false;
-  }
-
-  if (isDemoFromStart(env)) {
-    return true;
-  }
-
-  return isDemoPaymentApproved(sessionState);
+  return isDemoMode(env);
 }

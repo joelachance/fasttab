@@ -2,11 +2,7 @@ import { OrderSessionStore } from "./order-session-store.js";
 import type { ConfirmedPreferences, FoodrunOrderState } from "./order-state.js";
 import type { Env } from "../env.js";
 import { sanitizeDemoUserFacingCopy } from "./demo-user-facing.js";
-import {
-  isDemoFromStart,
-  isDemoMode,
-  shouldPlaceLiveOrders,
-} from "./runtime-config.js";
+import { isDemoMode, shouldPlaceLiveOrders } from "./runtime-config.js";
 import {
   createSupermemoryMemory,
   fetchSupermemoryContext,
@@ -122,7 +118,9 @@ async function handleFoodrunTextMessageCore(
 
     return {
       reply:
-        "Status: retrying cart. I'll text you when the draft cart is ready, or if checkout blocks me.",
+        isDemoMode(options.env) ?
+          "Retrying demo cart — I'll text when the draft is ready."
+        : "Status: retrying cart. I'll text you when the draft cart is ready, or if checkout blocks me.",
       state: "building_cart",
       extracted,
     };
@@ -130,7 +128,10 @@ async function handleFoodrunTextMessageCore(
 
   if (isBusy(session.state)) {
     return {
-      reply: "Status: still working. I'll text you when this FastTab step finishes or needs input.",
+      reply:
+        isDemoMode(options.env) ?
+          "Still working — I'll text when this step finishes."
+        : "Status: still working. I'll text you when this FastTab step finishes or needs input.",
       state: session.state,
       extracted,
     };
@@ -212,8 +213,8 @@ async function handleFoodrunTextMessageCore(
 
     return {
       reply:
-        isDemoMode(options.env) && !shouldPlaceLiveOrders(options.env) ?
-          "Status: payment approved. Running demo checkout — no real card or restaurant order. I'll text when split links are ready."
+        isDemoMode(options.env) ?
+          "Running demo checkout (no real order). I'll text split links shortly."
         : shouldPlaceLiveOrders(options.env) ?
           "Status: preparing checkout. I'll place the order on the restaurant site with a virtual card and text you when it's done."
         : "Status: preparing checkout. Test mode will not place a real order.",
@@ -243,8 +244,8 @@ async function handleFoodrunTextMessageCore(
 
     return {
       reply:
-        isDemoFromStart(options.env) ?
-          "Status: building your demo cart — I'll text when the draft is ready (not a real order)."
+        isDemoMode(options.env) ?
+          "Building demo cart — I'll text when ready (not a real order)."
         : "Status: searching restaurants. I'll text you when I find a match and start the cart.",
       state: "searching_restaurants",
       extracted: preferences,
@@ -361,33 +362,31 @@ export function formatPreferenceConfirmation(
   env: Env = process.env,
 ): string {
   const facts = preferenceLines(preferences);
-  const demo = isDemoFromStart(env);
+  const demo = isDemoMode(env);
 
   if (facts.length === 0) {
     return demo ?
-        "Hi, this is FastTab (demo mode). Text what you want and where — e.g. cookies to 506 20th St."
+        "FastTab demo. Text what you want and where — e.g. cookies to 506 20th St."
       : "Hi, this is your FastTab agent. What would you like to order?";
   }
 
   if (!hasOrderLocation(preferences)) {
     return [
-      demo ? "Hi, this is FastTab (demo mode — not a real order). I have:" : "Hi, this is your FastTab agent. I have:",
+      demo ? "FastTab demo (not a real order). I have:" : "Hi, this is your FastTab agent. I have:",
       ...facts.map((fact) => `- ${fact}`),
       "",
       demo ?
-        "Send a delivery address, then reply yes. Example: cookies to 506 20th St, San Francisco."
+        "Send an address, then reply yes. Example: cookies to 506 20th St."
       : "Send a delivery address or neighborhood, then reply yes to search.",
       ...(demo ? [] : ["Example: Insomnia Cookies delivery to 506 20th St, San Francisco."]),
     ].join("\n");
   }
 
   return [
-    demo ? "Hi, this is FastTab (demo mode — not a real order). I have:" : "Hi, this is your FastTab agent. I have:",
+    demo ? "FastTab demo (not a real order). I have:" : "Hi, this is your FastTab agent. I have:",
     ...facts.map((fact) => `- ${fact}`),
     "",
-    demo ?
-      "Reply yes to build your demo cart (no browser search), or send changes."
-    : "Reply yes to search restaurants, or send changes.",
+    demo ? "Reply yes to build your demo cart, or send changes." : "Reply yes to search restaurants, or send changes.",
   ].join("\n");
 }
 

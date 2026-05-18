@@ -319,11 +319,11 @@ describe("text intake", () => {
     ).toBe(true);
   });
 
-  test("confirm order uses demo checkout copy after payment approval", async () => {
+  test("confirm order uses demo checkout copy in demo mode", async () => {
     const { store } = createFakeStore("confirming_cart", {
       cart: {
-        restaurantName: "Mission Thai",
-        items: [{ name: "Pad Thai", quantity: 1 }],
+        restaurantName: "FastTab Demo Bakery",
+        items: [{ name: "Classic Chocolate Chunk", quantity: 1 }],
         screenshots: [],
         status: "checkout_ready",
         blockers: [],
@@ -338,11 +338,12 @@ describe("text intake", () => {
         body: "confirm order",
         channel: "imessage",
       },
-      { store, memory: null, env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "dry_run" } },
+      { store, memory: null, env: { FOODRUN_DEMO_MODE: "true", FOODRUN_CHECKOUT_MODE: "live" } },
     );
 
     expect(result.reply).toContain("demo checkout");
-    expect(result.reply).toContain("payment approved");
+    expect(result.reply).not.toContain("virtual card");
+    expect(result.reply).not.toContain("restaurant site");
   });
 
   test("confirm order mentions browser placement in live checkout mode", async () => {

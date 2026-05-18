@@ -33,7 +33,7 @@ import type {
   FoodrunParticipant,
 } from "./order-state.js";
 import { resolveCustomerDeliveryPhone } from "./customer-phone.js";
-import { demoBlockersForUserFacing, sanitizeDemoUserFacingCopy } from "./demo-user-facing.js";
+import { sanitizeDemoUserFacingCopy } from "./demo-user-facing.js";
 import {
   isDemoMode,
   shouldPlaceLiveOrders,
@@ -855,7 +855,7 @@ async function buildCartWithFallback(
   options: Parameters<FoodrunBrowserUse["buildCart"]>[2],
   env: Env = process.env,
 ): ReturnType<FoodrunBrowserUse["buildCart"]> {
-  if (shouldUseDemoRestaurantPipeline(env)) {
+  if (isDemoMode(env)) {
     const output = buildDemoCatalogCart(criteria, restaurant);
 
     return {
@@ -942,9 +942,7 @@ function buildInternalDraftCart(
     status: "draft",
     blockers: [
       "Browser Use could not create a checkout-ready website cart, so FastTab built an internal draft cart.",
-      ...(isDemoMode(env) ?
-        demoBlockersForUserFacing(blockers)
-      : blockers.map(formatFailureReason)),
+      ...blockers.map(formatFailureReason),
     ],
   };
 }
@@ -1055,6 +1053,10 @@ function formatCartReadyText(
   cart: CartSummary,
   env: Env = process.env,
 ): string {
+  if (isDemoMode(env)) {
+    return formatDemoCartReadyText(restaurant, cart);
+  }
+
   const total = cartTotalCents(cart);
   const totalLine = total ? ` Estimated total: $${(total / 100).toFixed(2)}.` : "";
   const items = cart.items
@@ -1072,8 +1074,6 @@ function formatCartReadyText(
     statusLine,
     cart.status === "blocked" ?
       `I could not build a checkout-ready cart at ${restaurant.name}.${totalLine}`
-    : isDemoCatalogCart(cart) ?
-      `FastTab demo cart (not a real order) from ${restaurant.name}.${totalLine}`
     : isInsomniaCatalogCart(cart) ?
       `I built a demo cart from the Insomnia Cookies menu for your group.${totalLine}`
     : `I checked ${restaurant.name} and built this FastTab option.${totalLine}`,
@@ -1087,8 +1087,35 @@ function formatCartReadyText(
     .join("\n");
 }
 
+function formatDemoCartReadyText(restaurant: RestaurantOption, cart: CartSummary): string {
+  const total = cartTotalCents(cart);
+  const totalPart = total ? ` ~$${(total / 100).toFixed(2)}` : "";
+  const items = cart.items
+    .slice(0, 5)
+    .map((item) => `${item.quantity}x ${item.name}`)
+    .join(", ");
+
+  if (cart.status === "blocked") {
+    return [
+      `Demo cart blocked at ${restaurant.name}${totalPart}. Not a real order.`,
+      items ? `Items: ${items}` : "",
+      "Reply retry cart or send changes.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return [
+    `Demo cart ready — ${restaurant.name}${totalPart}. Not a real order.`,
+    items ? `Items: ${items}` : "",
+    "Reply confirm order, no, or changes.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function formatCartBlockerLine(cart: CartSummary, env: Env = process.env): string {
-  if (isDemoCatalogCart(cart)) {
+  if (isDemoMode(env) || isDemoCatalogCart(cart)) {
     return "";
   }
 
@@ -1096,18 +1123,11 @@ function formatCartBlockerLine(cart: CartSummary, env: Env = process.env): strin
     return cart.blockers[0] ?? "";
   }
 
-  const blockers =
-    isDemoMode(env) ? demoBlockersForUserFacing(cart.blockers) : cart.blockers;
-
-  if (!blockers.length) {
+  if (!cart.blockers.length) {
     return "";
   }
 
-  if (isDemoMode(env)) {
-    return blockers.join(". ");
-  }
-
-  return `Blocked by: ${blockers.join(", ")}`;
+  return `Blocked by: ${cart.blockers.join(", ")}`;
 }
 
 function formatRestaurantFoundText(restaurant: RestaurantOption): string {
