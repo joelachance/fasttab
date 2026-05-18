@@ -1,6 +1,5 @@
 import { OrderSessionStore } from "./order-session-store.js";
 import type { ConfirmedPreferences, FoodrunOrderState } from "./order-state.js";
-import { SupermemoryModule } from "../modules/supermemory.js";
 import type { Env } from "../env.js";
 import {
   isDemoFromStart,
@@ -8,10 +7,11 @@ import {
   shouldPlaceLiveOrders,
 } from "./runtime-config.js";
 import {
-  createSupermemoryReader,
+  createSupermemoryMemory,
   fetchSupermemoryContext,
   mergeSupermemoryIntoPreferences,
   supermemoryQueryFromPreferences,
+  type SupermemoryMemory,
   type SupermemoryReader,
 } from "./supermemory-context.js";
 
@@ -41,7 +41,7 @@ export type FoodrunTextStore = Pick<
   | "enqueueJob"
 >;
 
-export type FoodrunPreferenceMemory = Pick<SupermemoryModule, "rememberPreference" | "searchPreferences">;
+export type FoodrunPreferenceMemory = SupermemoryMemory;
 
 export async function handleFoodrunTextMessage(
   input: FoodrunTextMessage,
@@ -419,7 +419,7 @@ async function rememberExtractedFacts(
 }
 
 function createMemory(env: Env = process.env): FoodrunPreferenceMemory | null {
-  return createSupermemoryReader(env);
+  return createSupermemoryMemory(env);
 }
 
 async function hydrateSupermemoryContext(

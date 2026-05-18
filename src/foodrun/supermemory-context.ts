@@ -3,6 +3,7 @@ import { SupermemoryModule } from "../modules/supermemory.js";
 import type { Env } from "../env.js";
 
 export type SupermemoryReader = Pick<SupermemoryModule, "searchPreferences">;
+export type SupermemoryMemory = Pick<SupermemoryModule, "rememberPreference" | "searchPreferences">;
 
 export function supermemoryQueryFromPreferences(preferences: ConfirmedPreferences): string {
   const parts = [
@@ -90,6 +91,10 @@ export async function fetchSupermemoryContext(
 }
 
 export function createSupermemoryReader(env: Env = process.env): SupermemoryReader | null {
+  return createSupermemoryMemory(env);
+}
+
+export function createSupermemoryMemory(env: Env = process.env): SupermemoryMemory | null {
   return env.SUPERMEMORY_API_KEY ? new SupermemoryModule(env) : null;
 }
 
