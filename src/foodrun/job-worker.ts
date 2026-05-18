@@ -761,8 +761,38 @@ function fallbackItemNotes(criteria: OrderCriteria): string | undefined {
   return notes.length ? notes.join("; ") : undefined;
 }
 
-function cartTotalCents(cart: CartSummary | undefined): number | undefined {
-  return cart?.estimatedTotal?.cents ?? cart?.subtotal?.cents;
+/** Cart total for checkout; falls back to priced line items when header totals are missing. */
+export function cartTotalCents(cart: CartSummary | undefined): number | undefined {
+  if (!cart) {
+    return undefined;
+  }
+
+  if (cart.estimatedTotal?.cents !== undefined) {
+    return cart.estimatedTotal.cents;
+  }
+  if (cart.subtotal?.cents !== undefined) {
+    return cart.subtotal.cents;
+  }
+
+  let itemTotal = 0;
+  let pricedLineCount = 0;
+
+  for (const item of cart.items) {
+    const unitCents = item.price?.cents;
+
+    if (unitCents === undefined) {
+      continue;
+    }
+
+    pricedLineCount += 1;
+    itemTotal += unitCents * item.quantity;
+  }
+
+  if (pricedLineCount === 0) {
+    return undefined;
+  }
+
+  return itemTotal + (cart.taxesAndFees?.cents ?? 0);
 }
 
 /** Live checkout card limit: max(cart total, SPONGE_FOOD_ORDER_CARD_AMOUNT_USD floor). */

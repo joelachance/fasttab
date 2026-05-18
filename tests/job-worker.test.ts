@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   browserUseResumeSessionId,
+  cartTotalCents,
   FOODRUN_STALE_JOB_SECONDS,
   processFoodrunJobs,
   type FoodrunBrowserUse,
@@ -984,6 +985,79 @@ describe("processFoodrunJobs", () => {
       notifier: null,
       env: { FOODRUN_INSOMNIA_CATALOG_CART: "false" },
     });
+  });
+
+  test("cartTotalCents sums priced line items when header totals are missing", () => {
+    expect(
+      cartTotalCents({
+        restaurantName: "Basil Cafe",
+        items: [
+          { name: "Pad Thai", quantity: 1, price: { currency: "usd", cents: 1550 } },
+          { name: "Spring rolls", quantity: 2, price: { currency: "usd", cents: 800 } },
+        ],
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      }),
+    ).toBe(3150);
+    expect(
+      cartTotalCents({
+        restaurantName: "Basil Cafe",
+        items: [{ name: "Pad Thai", quantity: 1 }],
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      }),
+    ).toBeUndefined();
+  });
+
+  test("live checkout uses line-item totals when browser cart omits subtotal", async () => {
+    const session: FoodrunOrderSession = {
+      ...baseSession,
+      state: "issuing_card",
+      selectedRestaurant: {
+        name: "Basil Cafe Thai Cuisine",
+        orderingUrl: "https://example.com/order",
+        reason: "Close",
+        dietaryFit: [],
+      },
+      cart: {
+        restaurantName: "Basil Cafe Thai Cuisine",
+        checkoutUrl: "https://example.com/cart",
+        items: [{ name: "Pad Thai", quantity: 1, price: { currency: "usd", cents: 1550 } }],
+        screenshots: [],
+        status: "checkout_ready",
+        blockers: [],
+      },
+    };
+    const { store } = createStore({
+      jobs: [job({ kind: "checkout_payment" })],
+      session,
+    });
+    const amounts: string[] = [];
+    const sponge: FoodrunSponge = {
+      issueFoodOrderCard: async (input) => {
+        amounts.push(input.amountUsd ?? "");
+        return {
+          cardNumber: "4111111111111111",
+          cvc: "123",
+          expiration: "12/29",
+          raw: {},
+        };
+      },
+    };
+
+    await processFoodrunJobs(1, {
+      store,
+      sponge,
+      notifier: null,
+      env: {
+        FOODRUN_CHECKOUT_MODE: "live",
+        SPONGE_FOOD_ORDER_CARD_AMOUNT_USD: "75",
+      },
+    });
+
+    expect(amounts).toEqual(["75.00"]);
   });
 
   test("live checkout issues sponge card at least SPONGE_FOOD_ORDER_CARD_AMOUNT_USD", async () => {
