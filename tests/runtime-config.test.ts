@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { foodrunRuntimeConfig, shouldPlaceLiveOrders } from "../src/foodrun/runtime-config";
+import { foodrunRuntimeConfig, isDemoMode, shouldPlaceLiveOrders } from "../src/foodrun/runtime-config";
 
 describe("foodrunRuntimeConfig", () => {
   test("defaults checkout to dry run", () => {
@@ -19,5 +19,11 @@ describe("foodrunRuntimeConfig", () => {
     expect(() => foodrunRuntimeConfig({ FOODRUN_CHECKOUT_MODE: "test" })).toThrow(
       "FOODRUN_CHECKOUT_MODE must be dry_run or live",
     );
+  });
+
+  test("demo mode is opt-in via FOODRUN_DEMO_MODE", () => {
+    expect(isDemoMode({})).toBe(false);
+    expect(isDemoMode({ FOODRUN_DEMO_MODE: "true" })).toBe(true);
+    expect(isDemoMode({ FOODRUN_DEMO_MODE: "false" })).toBe(false);
   });
 });

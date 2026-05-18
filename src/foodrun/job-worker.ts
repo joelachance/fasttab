@@ -7,6 +7,12 @@ import {
   prefersMarketplaceOrdering,
 } from "../modules/browser-use/ordering-urls.js";
 import {
+  buildDemoCatalogCart,
+  DEMO_CATALOG_CART_SESSION_ID,
+  demoRestaurantFromCriteria,
+  isDemoCatalogCart,
+} from "../modules/demo-catalog-cart.js";
+import {
   buildInsomniaCatalogCart,
   INSOMNIA_CATALOG_CART_SESSION_ID,
   insomniaCatalogCartEnabled,
@@ -26,7 +32,7 @@ import type {
   FoodrunOrderSession,
   FoodrunParticipant,
 } from "./order-state.js";
-import { shouldPlaceLiveOrders } from "./runtime-config.js";
+import { isDemoMode, shouldPlaceLiveOrders } from "./runtime-config.js";
 
 export const FOODRUN_JOB_MAX_DURATION_SECONDS = 300;
 export const FOODRUN_STALE_JOB_SECONDS = 120;
@@ -205,6 +211,34 @@ async function searchRestaurants(
   const availabilityScanner =
     options.availabilityScanner ?? new RestaurantAvailabilityModule(options.env ?? process.env);
   const criteria = buildOrderCriteria(session, participants);
+
+  if (isDemoMode(options.env)) {
+    const restaurant = demoRestaurantFromCriteria(criteria);
+
+    await options.store.updateOrderSession(job.roomId, {
+      state: "building_cart",
+      selectedRestaurant: restaurant,
+      browserUseSessionId: null,
+      browserUseLiveUrl: null,
+    });
+    await options.store.appendEvent({
+      roomId: job.roomId,
+      eventType: "demo_restaurant_selected",
+      payload: { restaurant },
+    });
+    await options.store.enqueueJob({
+      roomId: job.roomId,
+      kind: "cart_build",
+      payload: job.payload,
+    });
+    await notify(
+      job,
+      options,
+      `Status: demo mode. Using ${restaurant.name} (not a real restaurant). Building your draft cart now.`,
+    );
+    return;
+  }
+
   const marketplaceRestaurant = marketplaceRestaurantFromPreferences(session.confirmedPreferences);
 
   if (marketplaceRestaurant) {
@@ -559,6 +593,19 @@ async function buildCartWithFallback(
   options: Parameters<FoodrunBrowserUse["buildCart"]>[2],
   env: Env = process.env,
 ): ReturnType<FoodrunBrowserUse["buildCart"]> {
+  if (isDemoMode(env)) {
+    const output = buildDemoCatalogCart(criteria, restaurant);
+
+    return {
+      sessionId: DEMO_CATALOG_CART_SESSION_ID,
+      output,
+      raw: {
+        id: DEMO_CATALOG_CART_SESSION_ID,
+        output,
+      } as Awaited<ReturnType<FoodrunBrowserUse["buildCart"]>>["raw"],
+    };
+  }
+
   if (insomniaCatalogCartEnabled(env) && isInsomniaBrand(restaurant, criteria)) {
     const output = buildInsomniaCatalogCart(criteria, restaurant);
 
@@ -716,6 +763,8 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
     statusLine,
     cart.status === "blocked" ?
       `I could not build a checkout-ready cart at ${restaurant.name}.${totalLine}`
+    : isDemoCatalogCart(cart) ?
+      `FastTab demo cart (not a real order) from ${restaurant.name}.${totalLine}`
     : isInsomniaCatalogCart(cart) ?
       `I built a demo cart from the Insomnia Cookies menu for your group.${totalLine}`
     : `I checked ${restaurant.name} and built this FastTab option.${totalLine}`,
@@ -730,7 +779,7 @@ function formatCartReadyText(restaurant: RestaurantOption, cart: CartSummary): s
 }
 
 function formatCartBlockerLine(cart: CartSummary): string {
-  if (isInsomniaCatalogCart(cart)) {
+  if (isDemoCatalogCart(cart) || isInsomniaCatalogCart(cart)) {
     return cart.blockers[0] ?? "";
   }
 

@@ -19,3 +19,8 @@ export function foodrunRuntimeConfig(env: Env = process.env): FoodrunRuntimeConf
 export function shouldPlaceLiveOrders(env: Env = process.env): boolean {
   return foodrunRuntimeConfig(env).checkoutMode === "live";
 }
+
+/** Hackathon SMS demo: stub restaurant/cart, skip Browser Use and open-hours checks. */
+export function isDemoMode(env: Env = process.env): boolean {
+  return envWithDefault(env, "FOODRUN_DEMO_MODE", "false").toLowerCase() === "true";
+}

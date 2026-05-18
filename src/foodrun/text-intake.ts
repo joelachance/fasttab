@@ -2,6 +2,7 @@ import { OrderSessionStore } from "./order-session-store.js";
 import type { ConfirmedPreferences, FoodrunOrderState } from "./order-state.js";
 import { SupermemoryModule } from "../modules/supermemory.js";
 import type { Env } from "../env.js";
+import { isDemoMode } from "./runtime-config.js";
 
 export type FoodrunTextMessage = {
   roomId: string;
@@ -198,7 +199,10 @@ export async function handleFoodrunTextMessage(
     });
 
     return {
-      reply: "Status: searching restaurants. I'll text you when I find a match and start the cart.",
+      reply:
+        isDemoMode(options.env) ?
+          "Status: demo mode. Building your draft cart now — I'll text when it's ready (not a real restaurant order)."
+        : "Status: searching restaurants. I'll text you when I find a match and start the cart.",
       state: "searching_restaurants",
       extracted: preferences,
     };
@@ -211,7 +215,7 @@ export async function handleFoodrunTextMessage(
   await rememberExtractedFacts(input, preferences, options.memory ?? createMemory(options.env));
 
   return {
-    reply: formatPreferenceConfirmation(preferences),
+    reply: formatPreferenceConfirmation(preferences, options.env),
     state: "confirming_preferences",
     extracted: preferences,
   };
@@ -309,28 +313,38 @@ export function extractPreferenceFacts(text: string): ConfirmedPreferences {
   return preferences;
 }
 
-export function formatPreferenceConfirmation(preferences: ConfirmedPreferences): string {
+export function formatPreferenceConfirmation(
+  preferences: ConfirmedPreferences,
+  env: Env = process.env,
+): string {
   const facts = preferenceLines(preferences);
+  const demo = isDemoMode(env);
 
   if (facts.length === 0) {
-    return "Hi, this is your FastTab agent. What would you like to order?";
+    return demo ?
+        "Hi, this is FastTab (demo mode). Text what you want and where — e.g. cookies to 506 20th St."
+      : "Hi, this is your FastTab agent. What would you like to order?";
   }
 
   if (!hasOrderLocation(preferences)) {
     return [
-      "Hi, this is your FastTab agent. I have:",
+      demo ? "Hi, this is FastTab (demo mode — not a real order). I have:" : "Hi, this is your FastTab agent. I have:",
       ...facts.map((fact) => `- ${fact}`),
       "",
-      "Send a delivery address or neighborhood, then reply yes to search.",
-      "Example: Insomnia Cookies delivery to 506 20th St, San Francisco.",
+      demo ?
+        "Send a delivery address, then reply yes. Example: cookies to 506 20th St, San Francisco."
+      : "Send a delivery address or neighborhood, then reply yes to search.",
+      ...(demo ? [] : ["Example: Insomnia Cookies delivery to 506 20th St, San Francisco."]),
     ].join("\n");
   }
 
   return [
-    "Hi, this is your FastTab agent. I have:",
+    demo ? "Hi, this is FastTab (demo mode — not a real order). I have:" : "Hi, this is your FastTab agent. I have:",
     ...facts.map((fact) => `- ${fact}`),
     "",
-    "Reply yes to search restaurants, or send changes.",
+    demo ?
+      "Reply yes to build your demo cart (no browser search), or send changes."
+    : "Reply yes to search restaurants, or send changes.",
   ].join("\n");
 }
 
