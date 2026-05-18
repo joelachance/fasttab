@@ -166,6 +166,7 @@ function deliveryNotes(criteria: OrderCriteria): string | undefined {
       `Deliver to ${criteria.location.placeName ?? criteria.location.raw}`
     : undefined,
     criteria.deliveryPhone ? `Phone: ${criteria.deliveryPhone}` : undefined,
+    criteria.deliveryEmail ? `Email: ${criteria.deliveryEmail}` : undefined,
     criteria.allergies.length ? `Allergies: ${criteria.allergies.join(", ")}` : undefined,
     criteria.preferences.length ? criteria.preferences.join("; ") : undefined,
   ].filter(Boolean);

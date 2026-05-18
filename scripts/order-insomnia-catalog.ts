@@ -10,16 +10,18 @@
  *   bun run order:insomnia-catalog -- --preset rotate --items 6
  *   bun run order:insomnia-catalog -- --bundles 2
  *   bun run order:insomnia-catalog -- --sponge
+ *   bun run order:insomnia-catalog -- --email satori@agentmail.to
  *
  * Env (.env.local via env helpers):
  *   FOODRUN_INSOMNIA_CATALOG_CART — set false to disable catalog path (default true)
  *   FOODRUN_DELIVERY_PHONE — customer E.164 when --phone is omitted
+ *   FOODRUN_ORDER_EMAIL — customer email at Insomnia checkout (default satori@agentmail.to)
  *   SPONGE_API_KEY, SPONGE_AGENT_ID, … — required for --sponge (see sponge:fetch-card)
  *
  * Complete payment manually:
  *   1. Open checkoutUrl (Buy 9 Get 3 Free product on insomniacookies.com).
  *   2. Add the deal bundle count (default 2×); pick 9 paid + 3 free flavors per bundle on site.
- *   3. Start delivery to the address in cart notes; enter the customer phone at checkout.
+ *   3. Start delivery to the address in cart notes; enter the customer phone and email at checkout.
  *   4. Pay with your Sponge virtual card: run with --sponge or `bun run sponge:fetch-card`
  *      for masked PAN/expiry and limits; enter full card details on the Insomnia checkout form.
  */
@@ -50,6 +52,7 @@ import {
 import type { CartSummary, OrderCriteria, RestaurantOption } from "../src/types.js";
 
 const DEFAULT_ADDRESS = "560 20th St, San Francisco, CA";
+const DEFAULT_ORDER_EMAIL = "satori@agentmail.to";
 const DEFAULT_ROTATE_ITEM_COUNT = 3;
 const INSOMNIA_RESTAURANT: RestaurantOption = {
   name: "Insomnia Cookies",
@@ -66,6 +69,7 @@ type Preset = "default" | "skus" | "rotate";
 
 type CliOptions = {
   phone?: string;
+  email: string;
   address: string;
   preset: Preset;
   rotateItems: number;
@@ -74,9 +78,10 @@ type CliOptions = {
 };
 
 function usage(): never {
-  console.error(`Usage: bun run order:insomnia-catalog [--phone E164] [--address "…"] [--preset default|skus|rotate] [--bundles N] [--items N] [--sponge]
+  console.error(`Usage: bun run order:insomnia-catalog [--phone E164] [--email ADDR] [--address "…"] [--preset default|skus|rotate] [--bundles N] [--items N] [--sponge]
 
   --phone     Customer delivery phone (E.164). Default: FOODRUN_DELIVERY_PHONE from .env.local
+  --email     Customer email at Insomnia checkout. Default: FOODRUN_ORDER_EMAIL or ${DEFAULT_ORDER_EMAIL}
   --address   Delivery address. Default: ${DEFAULT_ADDRESS}
   --preset    default: 2× Buy 9 Get 3 Free (${INSOMNIA_B9G3F_PRODUCT_URL}). skus: 4 flavors × 3 (12 cookies à la carte). rotate: cycle menu SKUs
   --bundles   B9G3F bundle count for default preset (1–4). Default: ${INSOMNIA_DEFAULT_BUNDLE_COUNT}
@@ -88,6 +93,7 @@ function usage(): never {
 
 function parseArgs(argv: string[]): CliOptions {
   let phone: string | undefined;
+  let email: string | undefined;
   let address = DEFAULT_ADDRESS;
   let preset: Preset = "default";
   let rotateItems = DEFAULT_ROTATE_ITEM_COUNT;
@@ -99,6 +105,11 @@ function parseArgs(argv: string[]): CliOptions {
 
     if (arg === "--phone") {
       phone = argv[index + 1] ?? usage();
+      index += 1;
+      continue;
+    }
+    if (arg === "--email") {
+      email = argv[index + 1] ?? usage();
       index += 1;
       continue;
     }
@@ -150,7 +161,16 @@ function parseArgs(argv: string[]): CliOptions {
     }
   }
 
-  return { phone, address, preset, rotateItems, bundleCount, sponge };
+  return { phone, email: email ?? "", address, preset, rotateItems, bundleCount, sponge };
+}
+
+function resolveOrderEmail(options: CliOptions, env: NodeJS.ProcessEnv): string {
+  const fromCli = options.email.trim();
+  if (fromCli) {
+    return fromCli;
+  }
+
+  return envWithDefault(env, "FOODRUN_ORDER_EMAIL", DEFAULT_ORDER_EMAIL).trim() || DEFAULT_ORDER_EMAIL;
 }
 
 async function resolveSpongeAgentId(env: NodeJS.ProcessEnv): Promise<void> {
@@ -221,7 +241,7 @@ function maskedSpongeCard(card: FoodOrderCard) {
     paymentInstructions: [
       `Open checkoutUrl and add ${INSOMNIA_B9G3F_DEAL_NAME} bundles on insomniacookies.com.`,
       "Enter the full virtual card number, expiry, and CVC from Sponge (bun run sponge:fetch-card if not shown here).",
-      "Use the delivery address and customer phone from cart line item notes.",
+      "Use the delivery address, customer phone, and email from cart line item notes.",
     ],
   };
 }
@@ -256,6 +276,7 @@ function buildCriteria(options: CliOptions, env: NodeJS.ProcessEnv): OrderCriter
     preferences: ["Insomnia Cookies"],
     allergies: [],
     deliveryPhone,
+    deliveryEmail: resolveOrderEmail(options, env),
   };
 }
 
@@ -318,6 +339,7 @@ async function main(): Promise<void> {
       : undefined,
     deliveryAddress: criteria.location.placeName ?? criteria.location.raw,
     deliveryPhone: criteria.deliveryPhone,
+    deliveryEmail: criteria.deliveryEmail,
     checkoutUrl: cart.checkoutUrl,
     restaurantName: cart.restaurantName,
     lineItems,
@@ -337,6 +359,7 @@ async function main(): Promise<void> {
   console.error(`  Checkout: ${cart.checkoutUrl}`);
   console.error(`  Deliver to: ${payload.deliveryAddress}`);
   console.error(`  Phone: ${payload.deliveryPhone}`);
+  console.error(`  Email: ${payload.deliveryEmail} (use this email at Insomnia checkout)`);
   if (cli.preset === "default") {
     console.error(
       `  Order on site: add ${cli.bundleCount}× "${INSOMNIA_B9G3F_DEAL_NAME}" (${INSOMNIA_B9G3F_COOKIES_PER_BUNDLE} cookies each: 9 paid + 3 free)`,
@@ -351,7 +374,9 @@ async function main(): Promise<void> {
   }
   console.error(`  Estimated total: ${payload.totalUsd ?? "n/a"}${payload.pricePlaceholder ? ` (${payload.pricePlaceholder})` : ""}`);
   console.error("");
-  console.error("To pay: open checkout URL, configure deal(s) + delivery, checkout with Sponge card.");
+  console.error(
+    "To pay: open checkout URL, configure deal(s) + delivery, enter the email above at Insomnia checkout, then pay with Sponge card.",
+  );
   if (!cli.sponge) {
     console.error("  Tip: re-run with --sponge or `bun run sponge:fetch-card` for card details.");
   }

@@ -27,6 +27,7 @@ const criteria: OrderCriteria = {
   preferences: ["Insomnia Cookies"],
   allergies: ["peanuts"],
   deliveryPhone: "+15551234567",
+  deliveryEmail: "satori@agentmail.to",
 };
 
 const restaurant: RestaurantOption = {
@@ -66,6 +67,7 @@ describe("insomnia-catalog-cart", () => {
     );
     expect(cart.items[0]?.notes).toContain("506 20th St");
     expect(cart.items[0]?.notes).toContain("+15551234567");
+    expect(cart.items[0]?.notes).toContain("satori@agentmail.to");
     expect(cart.items[0]?.notes).toContain("peanuts");
     expect(cart.estimatedTotal?.cents).toBe(449 + 549 + 449);
     expect(cart.blockers).toEqual([INSOMNIA_CATALOG_CART_NOTE]);

@@ -26,6 +26,8 @@ export type OrderCriteria = {
   allergies: string[];
   /** Customer phone for delivery/checkout (E.164), not AgentPhone's number. */
   deliveryPhone?: string;
+  /** Customer email for delivery/checkout receipts. */
+  deliveryEmail?: string;
   surpriseUs?: boolean;
 };
 
