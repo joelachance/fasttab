@@ -11,6 +11,7 @@
     "demo:collect": "bun run scripts/demo-collect-splits.ts",
     "foodrun:jobs": "bun --env-file=.env.local run scripts/process-jobs.ts",
     "order:insomnia-catalog": "bun --env-file=.env.local run scripts/order-insomnia-catalog.ts",
+    "repro:insomnia-bu": "bun --env-file=.env.local run scripts/repro-insomnia-bu.ts",
     "sponge:fetch-card": "bun --env-file=.env.local run scripts/fetch-sponge-card.ts",
     "sponge:issue-card": "bun --env-file=.env.local run scripts/issue-sponge-card.ts",
     "dev:webhook": "node --env-file=.env.local --import tsx src/server.ts",
